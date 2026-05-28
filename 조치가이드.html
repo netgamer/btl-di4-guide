@@ -824,6 +824,76 @@ WHERE n.nspname = 'gdpslptl' AND p.proname = 'sp_upload_save_cd_chck';
       <div class="section"><h4>이전 사례 (collect_cnt)</h4>
         <div class="fix-box"><strong>2026-05-27</strong> &mdash; <code>gdpcl.collect_cnt(varchar, OUT int)</code> PROCEDURE 삭제 → FUNCTION(text) 만 남김 / 성공</div>
       </div>
+
+      <div class="section"><h4>적용 사례 3: gdpslptl 스키마 전체 PROCEDURE → FUNCTION 일괄 변환</h4>
+        <p>여러 SP 가 동시에 같은 에러를 일으킬 때, 하나씩 처리하는 대신 <strong>일괄 변환</strong>으로 처리.
+          본문 로직은 그대로 보존하고 선언부 (PROCEDURE → FUNCTION) 만 변경.</p>
+        <div class="warn-box" style="margin-bottom:8px;">⚠️ 이 SQL 은 <strong>gdpslptl 스키마의 <code>sp_*</code> PROCEDURE 전체</strong>를 대상으로 합니다.
+          시스템 PROCEDURE 는 영향 없음. 본문 로직은 보존됨.</div>
+        <p class="sql-copy-label">prod 일괄 변환 SQL:</p>
+        <div class="sql-copy-block">
+<textarea readonly>-- gdpslptl 스키마의 모든 sp_* PROCEDURE 를 FUNCTION 으로 일괄 변환
+-- 본문은 그대로 보존, 선언부만 변경
+
+DO $$
+DECLARE
+    rec record;
+    new_def text;
+BEGIN
+    FOR rec IN
+        SELECT p.oid, p.proname,
+               pg_get_function_identity_arguments(p.oid) AS args,
+               pg_get_functiondef(p.oid) AS def
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'gdpslptl'
+          AND p.prokind = 'p'
+          AND p.proname LIKE 'sp_%'
+        ORDER BY p.proname
+    LOOP
+        -- 백업 (NOTICE)
+        RAISE NOTICE '=== %.%(%) original PROCEDURE ===', 'gdpslptl', rec.proname, rec.args;
+        RAISE NOTICE '%', rec.def;
+
+        -- 선언부 변환
+        new_def := regexp_replace(rec.def,
+            'CREATE OR REPLACE PROCEDURE\s+(\S+\s*\([^)]*\))',
+            E'CREATE OR REPLACE FUNCTION \\1\n RETURNS void',
+            'i');
+
+        -- DROP + CREATE
+        EXECUTE format('DROP PROCEDURE %I.%I(%s)', 'gdpslptl', rec.proname, rec.args);
+        EXECUTE new_def;
+
+        RAISE NOTICE 'Converted: gdpslptl.%(%)', rec.proname, rec.args;
+    END LOOP;
+END $$;
+
+-- 검증: 변환 후 PROCEDURE 가 0개여야 함
+SELECT count(*) AS remaining_procedures
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'gdpslptl'
+  AND p.prokind = 'p'
+  AND p.proname LIKE 'sp_%';
+
+-- 변환된 FUNCTION 목록
+SELECT p.proname,
+       pg_get_function_identity_arguments(p.oid) AS args
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'gdpslptl'
+  AND p.prokind = 'f'
+  AND p.proname LIKE 'sp_%'
+ORDER BY p.proname;</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <div class="warn-box">
+          <strong>원리:</strong> regex 가 <code>CREATE OR REPLACE PROCEDURE ... (params)</code> 부분만 매칭해서 <code>CREATE OR REPLACE FUNCTION ... (params) RETURNS void</code> 로 변경. 본문 <code>BEGIN ... END</code> 는 그대로 유지.
+          <br><strong>안전성:</strong> psql 로그에 변환 전 원본 정의가 NOTICE 로 출력됨 (백업) + <code>prokind='p'</code> + <code>sp_%</code> 필터로 시스템 routine 영향 없음.
+        </div>
+        <div class="fix-box"><strong>2026-05-28</strong> &mdash; SP_STAT_REFINE, SP_STAT_DAY, SP_STAT_DAY_TMP, SP_SYNC_SIGUN_CD, SP_DATA_COND_DE, SP_MAP_SRCH_INF, SP_DS_HIS_LOAD 등 일괄 변환 예정</div>
+      </div>
     </div>
   </div>
 
