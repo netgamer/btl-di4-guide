@@ -1097,6 +1097,65 @@ ORDER BY p.proname;</textarea>
         </div>
         <div class="fix-box"><strong>2026-05-28</strong> &mdash; SP_STAT_REFINE, SP_STAT_DAY, SP_STAT_DAY_TMP, SP_SYNC_SIGUN_CD, SP_DATA_COND_DE, SP_MAP_SRCH_INF, SP_DS_HIS_LOAD 등 일괄 변환 예정</div>
       </div>
+
+      <div class="section"><h4>적용 사례 4: <code>gdpcl</code> 스키마 일괄 변환</h4>
+        <p>gdpcl 스키마에도 같은 패턴 발견 (예: <code>sp_ehojo_gg_expnd_excut_cost</code>). gdpslptl 과 동일한 방식으로 일괄 처리.</p>
+        <p class="sql-copy-label">gdpcl 스키마 일괄 변환 SQL:</p>
+        <div class="sql-copy-block">
+<textarea readonly>DO $$
+DECLARE
+    rec record;
+    new_def text;
+    has_out boolean;
+BEGIN
+    FOR rec IN
+        SELECT p.oid, p.proname,
+               pg_get_function_identity_arguments(p.oid) AS args,
+               pg_get_function_arguments(p.oid) AS full_args,
+               pg_get_functiondef(p.oid) AS def
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'gdpcl'
+          AND p.prokind = 'p'
+          AND p.proname LIKE 'sp_%'
+        ORDER BY p.proname
+    LOOP
+        has_out := rec.full_args ~* '(\mOUT\M|\mINOUT\M)';
+
+        RAISE NOTICE '=== gdpcl.%(%) ===', rec.proname, rec.args;
+        RAISE NOTICE '%', rec.def;
+
+        IF has_out THEN
+            new_def := regexp_replace(rec.def,
+                'CREATE OR REPLACE PROCEDURE',
+                'CREATE OR REPLACE FUNCTION',
+                'i');
+            RAISE NOTICE '  (OUT 파라미터 있음 — RETURNS 절 미추가)';
+        ELSE
+            new_def := regexp_replace(rec.def,
+                'CREATE OR REPLACE PROCEDURE\s+(\S+\s*\([^)]*\))',
+                E'CREATE OR REPLACE FUNCTION \\1\n RETURNS void',
+                'i');
+            RAISE NOTICE '  (OUT 없음 — RETURNS void 추가)';
+        END IF;
+
+        EXECUTE format('DROP PROCEDURE %I.%I(%s)', 'gdpcl', rec.proname, rec.args);
+        EXECUTE new_def;
+
+        RAISE NOTICE 'Converted: gdpcl.%(%)', rec.proname, rec.args;
+    END LOOP;
+END $$;
+
+-- 검증
+SELECT count(*) AS remaining_procedures
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'gdpcl' AND p.prokind = 'p' AND p.proname LIKE 'sp_%';</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <p style="font-size:12px; color:#666;"><strong>응용:</strong> 위 SQL 의 <code>gdpcl</code> 부분을 다른 스키마명 (예: <code>gdpdo</code>, <code>public</code>) 으로 바꿔서 다른 스키마도 처리 가능. 또는 <code>p.proname LIKE 'sp_%'</code> 조건을 빼면 모든 PROCEDURE 변환 (주의 — 시스템 PROCEDURE 도 변환되니 권장 안 함).</p>
+        <div class="fix-box"><strong>2026-05-28</strong> &mdash; <code>sp_ehojo_gg_expnd_excut_cost</code>, <code>sp_ehojo_gg_budget_excut_stus</code>, <code>sp_ehojo_gg_contract_status</code>, <code>sp_ehojo_gg_expnd_excut_genrl</code> 등 일괄 변환 예정</div>
+      </div>
     </div>
   </div>
 
