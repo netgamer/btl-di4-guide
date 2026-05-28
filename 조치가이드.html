@@ -313,7 +313,7 @@ document.addEventListener('DOMContentLoaded', function() {
       <tr><td><span class="case-tag tag-resolved">해결</span></td><td>잡 DML</td><td>SQL 42883</td><td>TO_CHAR 함수명이 컬럼명으로 치환됨</td><td><a href="#new-j3">J-3</a></td></tr>
       <tr><td><span class="case-tag tag-resolved">해결</span></td><td>잡 모델</td><td>EL10741</td><td>필드가 모델에 존재하지 않음</td><td><a href="#new-j4">J-4</a></td></tr>
       <tr style="background:#f0f0f0"><td colspan="5"><strong>SQL 실행 / 접속 에러 (Connection 속성 / DB routine)</strong></td></tr>
-      <tr><td><span class="case-tag tag-resolved">해결</span></td><td>DB routine</td><td>SQL 42809</td><td>"xxx is a procedure" — FUNCTION/PROCEDURE 충돌 (예외: SQL 처리)</td><td><a href="#new-s1">S-1</a></td></tr>
+      <tr><td><span class="case-tag tag-resolved">해결</span></td><td>DB routine</td><td>SQL 42809</td><td>"xxx is a procedure" — FUNCTION/PROCEDURE 충돌 + 본문 Oracle 문법 잔재 (최소 변경)</td><td><a href="#new-s1">S-1</a></td></tr>
       <tr><td><span class="case-tag tag-resolved">해결</span></td><td>접속</td><td>SQL 42704</td><td>role "postgres" does not exist — 접속 계정 불일치</td><td><a href="#new-s2">S-2</a></td></tr>
     </table>
   </div>
@@ -889,6 +889,17 @@ FROM
         <strong>핵심 안전장치:</strong> <code>prokind = 'p'</code> 필터로 PROCEDURE 만 대상. FUNCTION 은 절대 안 건드림.
       </div>
 
+      <div class="warn-box" style="background:#ffebee; border-left:4px solid #c62828;">
+        <strong>⚠️ 본문 변경 최소화 원칙 (중요):</strong>
+        <ul style="margin-left:20px; margin-top:6px;">
+          <li><strong>본문(BEGIN...END)을 통째로 다른 정의로 바꾸지 마세요</strong> — prod 의 비즈니스 로직 손실 위험.</li>
+          <li>S-1 변환은 <strong>선언부만</strong> (PROCEDURE → FUNCTION) 바꾸고 본문은 그대로 둠.</li>
+          <li>본문 안에 Oracle 문법이 남아 있으면 <strong>그 부분만 최소 교체</strong> (예: EXECUTE IMMEDIATE → EXECUTE).</li>
+          <li>변경 전 반드시 <code>pg_get_functiondef</code> 로 현재 정의 확인 후 진행.</li>
+          <li>dev 의 정의로 무작정 덮어쓰지 마세요 — dev 와 prod 의 비즈니스 로직이 다를 수 있음.</li>
+        </ul>
+      </div>
+
       <div class="section"><h4>에러 메시지</h4>
         <div class="error-box">EL00661 - xxx 실행시 SQLException이 발생하였습니다.
 원인: ERROR: [스키마].[이름]() is a procedure
@@ -1230,6 +1241,118 @@ ORDER BY p.proname;</textarea>
         <p style="font-size:12px; color:#666;"><strong>응용:</strong> 위 SQL 의 <code>gdpcl</code> 부분을 다른 스키마명 (예: <code>gdpdo</code>, <code>public</code>) 으로 바꿔서 다른 스키마도 처리 가능. 4단계 모두 같은 스키마명으로 변경 필요.</p>
 
         <div class="fix-box"><strong>2026-05-28</strong> &mdash; <code>sp_ehojo_gg_expnd_excut_cost</code>, <code>sp_ehojo_gg_budget_excut_stus</code>, <code>sp_ehojo_gg_contract_status</code>, <code>sp_ehojo_gg_expnd_excut_genrl</code> 등 일괄 변환 예정</div>
+      </div>
+
+      <div class="section"><h4>적용 사례 5: 변환된 FUNCTION 본문의 Oracle 문법 잔재 (최소 변경)</h4>
+        <p>PROCEDURE → FUNCTION 변환 후 본문에 Oracle 전용 문법 (예: <code>EXECUTE IMMEDIATE</code>) 이 남아 실행 시 에러 발생.</p>
+        <div class="error-box">EL00661 - SP_UPLOAD_SAVE_CD_CHCK 실행시 SQLException이 발생하였습니다.
+원인: ERROR: column "immediate" does not exist
+Where: PL/pgSQL function sp_upload_save_cd_chck(character varying) line 13 at EXECUTE
+SQLState = 42703</div>
+        <div class="warn-box" style="background:#ffebee; border-left:4px solid #c62828; margin-bottom:8px;">
+          <strong>⚠️ 절대 본문 통째 교체 금지!</strong> dev 의 정의로 무작정 덮어쓰면 prod 의 비즈니스 로직 손실 위험.
+          <strong>최소 변경 원칙</strong> 적용: Oracle 전용 문법 부분만 PG 동등 문법으로 교체.
+        </div>
+
+        <h5 style="margin-top:12px;">Oracle → PG 문법 대응표</h5>
+        <table class="change-table">
+          <tr><th>Oracle</th><th>PostgreSQL</th><th>비고</th></tr>
+          <tr><td><code>EXECUTE IMMEDIATE v_sql</code></td><td><code>EXECUTE v_sql</code></td><td>동적 SQL 실행 — IMMEDIATE 키워드 제거</td></tr>
+          <tr><td><code>DBMS_OUTPUT.PUT_LINE('msg')</code></td><td><code>RAISE NOTICE 'msg'</code></td><td>로깅 출력</td></tr>
+          <tr><td><code>SYSDATE</code></td><td><code>CURRENT_TIMESTAMP</code> 또는 <code>now()</code></td><td>현재 시각</td></tr>
+          <tr><td><code>NVL(x, y)</code></td><td><code>COALESCE(x, y)</code></td><td>NULL 대체</td></tr>
+          <tr><td><code>VARCHAR2(n)</code></td><td><code>VARCHAR(n)</code></td><td>가변 문자열</td></tr>
+          <tr><td><code>NUMBER</code></td><td><code>NUMERIC</code></td><td>숫자 타입</td></tr>
+          <tr><td><code>ROWNUM</code></td><td><code>ROW_NUMBER() OVER ()</code></td><td>행 번호 (J-3 참고)</td></tr>
+        </table>
+
+        <p class="sql-copy-label">STEP 1 — 현재 정의 확인 (변경 전 검토 필수):</p>
+        <div class="sql-copy-block">
+<textarea readonly>-- 현재 FUNCTION 의 전체 정의 출력
+SELECT pg_get_functiondef(p.oid) AS current_definition
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = '[스키마]' AND p.proname = '[함수명]';</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <p style="font-size:12px; color:#666;">→ 결과의 본문에서 Oracle 문법이 어느 줄에 있는지 정확히 파악.</p>
+
+        <p class="sql-copy-label">STEP 2 — 최소 변경 적용 (sp_upload_save_cd_chck 예시):</p>
+        <div class="sql-copy-block">
+<textarea readonly>DO $$
+DECLARE
+    old_def text;
+    new_def text;
+BEGIN
+    -- 1. 현재 정의 가져오기
+    SELECT pg_get_functiondef(p.oid)
+    INTO old_def
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'gdpslptl' AND p.proname = 'sp_upload_save_cd_chck'
+    LIMIT 1;
+
+    -- 2. 백업 출력 (psql 로그에 남김)
+    RAISE NOTICE '===== BEFORE (원본 백업) =====';
+    RAISE NOTICE '%', old_def;
+
+    -- 3. 최소 변경: EXECUTE IMMEDIATE → EXECUTE
+    new_def := regexp_replace(old_def, '\mEXECUTE\s+IMMEDIATE\M', 'EXECUTE', 'gi');
+
+    -- 4. 변경 후 출력 (검토용)
+    RAISE NOTICE '===== AFTER (변경 후) =====';
+    RAISE NOTICE '%', new_def;
+
+    -- 5. 변경 없으면 종료
+    IF old_def = new_def THEN
+        RAISE NOTICE '변경 사항 없음 - EXECUTE IMMEDIATE 패턴 미발견';
+        RETURN;
+    END IF;
+
+    -- 6. 적용
+    EXECUTE new_def;
+    RAISE NOTICE '✓ 적용 완료';
+END $$;</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <p style="font-size:12px; color:#666;">→ <code>regexp_replace</code> 가 <strong>해당 패턴만 정확히 매칭</strong>해서 교체. 다른 본문 코드는 보존.</p>
+
+        <p class="sql-copy-label">다른 Oracle 문법이 있는 경우 — 추가 regex 패턴 적용</p>
+        <div class="sql-copy-block">
+<textarea readonly>-- 여러 Oracle 문법을 한번에 최소 교체
+DO $$
+DECLARE
+    old_def text;
+    new_def text;
+BEGIN
+    SELECT pg_get_functiondef(p.oid) INTO old_def
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = '[스키마]' AND p.proname = '[함수명]' LIMIT 1;
+
+    RAISE NOTICE 'BEFORE: %', old_def;
+
+    new_def := old_def;
+    new_def := regexp_replace(new_def, '\mEXECUTE\s+IMMEDIATE\M', 'EXECUTE', 'gi');
+    new_def := regexp_replace(new_def, '\mSYSDATE\M', 'CURRENT_TIMESTAMP', 'gi');
+    new_def := regexp_replace(new_def, '\mNVL\s*\(', 'COALESCE(', 'gi');
+    new_def := regexp_replace(new_def, '\mVARCHAR2\M', 'VARCHAR', 'gi');
+    new_def := regexp_replace(new_def, '\mNUMBER\M(?!\()', 'NUMERIC', 'gi');
+
+    RAISE NOTICE 'AFTER: %', new_def;
+
+    IF old_def = new_def THEN
+        RAISE NOTICE '변경 사항 없음';
+        RETURN;
+    END IF;
+
+    EXECUTE new_def;
+    RAISE NOTICE '✓ 적용 완료';
+END $$;</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <p style="font-size:12px; color:#666;"><strong>주의:</strong> 일괄 regex 변환 전에 STEP 1 으로 본문을 확인하여 다른 Oracle 문법이 실제로 있는지 검증. 없는 패턴 변환은 무해하지만 일부 문법은 컨텍스트별로 다른 처리 필요할 수 있음.</p>
+
+        <div class="fix-box"><strong>2026-05-28</strong> &mdash; <code>gdpslptl.sp_upload_save_cd_chck</code>: 본문의 <code>EXECUTE IMMEDIATE</code> → <code>EXECUTE</code> 최소 교체 / 적용 예정</div>
       </div>
     </div>
   </div>
