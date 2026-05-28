@@ -106,6 +106,21 @@
   .change-table td { padding: 6px 10px; border: 1px solid #ccc; }
   .change-table code { background: #f5f5f5; padding: 1px 4px; border-radius: 2px; font-size: 11px; }
 
+  /* 통짜 소스 + 변경 부분 하이라이트 */
+  .full-source { background: #263238; color: #eeffff; padding: 16px; border-radius: 4px; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; line-height: 1.5; overflow-x: auto; white-space: pre; tab-size: 2; }
+  .full-source .added { background: #1b5e20; color: #c5e1a5; padding: 2px 4px; border-left: 3px solid #4caf50; display: inline-block; }
+  .full-source .added-line { background: rgba(76, 175, 80, 0.18); display: block; padding-left: 4px; border-left: 3px solid #4caf50; }
+  .full-source .modified { background: #5d4037; color: #ffd54f; padding: 1px 3px; border-radius: 2px; }
+  .full-source .modified-line { background: rgba(255, 152, 0, 0.18); display: block; padding-left: 4px; border-left: 3px solid #ff9800; }
+  .full-source .removed { background: #b71c1c; color: #ffcdd2; padding: 1px 3px; text-decoration: line-through; }
+  .full-source .comment { color: #546e7a; }
+  .full-source .keyword { color: #89ddff; }
+  .full-source .string { color: #c3e88d; }
+  .legend { font-size: 11px; margin: 8px 0; }
+  .legend .added { background: #1b5e20; color: #c5e1a5; padding: 2px 6px; border-radius: 3px; }
+  .legend .modified { background: #5d4037; color: #ffd54f; padding: 2px 6px; border-radius: 3px; }
+  .legend .removed { background: #b71c1c; color: #ffcdd2; padding: 2px 6px; border-radius: 3px; text-decoration: line-through; }
+
   .footer { text-align: center; padding: 30px; font-size: 12px; color: #999; }
 </style>
 <script>
@@ -1448,6 +1463,164 @@ END $$;</textarea>
             <li>STEP 4 검증 SQL 로 변경 반영 확인</li>
           </ol>
         </div>
+
+        <h5 style="margin-top:18px;">📋 전체 수정 후 소스 (한눈에 보기 — 변경된 부분 색상 표시)</h5>
+        <p class="legend">
+          <span class="added">초록 = 새로 추가된 줄</span> &nbsp;
+          <span class="modified">노랑 = 변경된 부분</span> &nbsp;
+          (나머지는 원본과 동일)
+        </p>
+        <div class="full-source"><span class="keyword">CREATE OR REPLACE FUNCTION</span> gdpslptl.sp_stat_refine(p_date <span class="keyword">character varying</span>)
+ <span class="keyword">RETURNS void</span>
+ <span class="keyword">LANGUAGE</span> plpgsql
+<span class="keyword">AS</span> $function$
+<span class="keyword">DECLARE</span>
+    <span class="comment">-- debug 처리</span>
+    p_retval <span class="keyword">INTEGER</span>;
+    p_retmsg <span class="keyword">VARCHAR</span>(500);          <span class="comment">-- 결과메세지</span>
+
+    <span class="comment">-- job 관련 변수</span>
+    v_job_name <span class="keyword">VARCHAR</span>(200) := <span class="string">'SP_STAT_REFINE'</span>;
+    v_job_tag <span class="keyword">VARCHAR</span>(50);
+    v_source <span class="keyword">VARCHAR</span>(500);
+    v_target <span class="keyword">VARCHAR</span>(500);
+    v_message <span class="keyword">VARCHAR</span>(2000);
+    v_rowcount <span class="keyword">INTEGER</span> := 0;
+
+    var_work_ym <span class="keyword">VARCHAR</span>(6);     <span class="comment">-- 기준월</span>
+    var_sql <span class="keyword">TEXT</span>;               <span class="comment">-- 동적 쿼리</span>
+    var_col_cnt <span class="keyword">INTEGER</span>;        <span class="comment">-- 컬럼 존재 확인용</span>
+<span class="added-line">    v_zip_col   <span class="keyword">TEXT</span>;           <span class="comment">-- 🟢 [수정 2] refine_zip 컬럼명 (refine_zip_cd or refine_zipno)</span></span>
+
+    <span class="comment">-- 주소정제 대상 데이터셋 목록 커서</span>
+    c_cur <span class="keyword">CURSOR FOR</span>
+        <span class="keyword">SELECT</span> d.owner_cd, d.ds_id
+        <span class="keyword">FROM</span> tb_open_ds d
+        <span class="keyword">INNER JOIN</span> information_schema.tables t
+            <span class="keyword">ON</span> lower(d.owner_cd) = lower(t.table_schema)
+            <span class="keyword">AND</span> lower(d.ds_id) = lower(t.table_name)
+        <span class="keyword">WHERE</span> d.use_yn = <span class="string">'Y'</span>
+            <span class="keyword">AND</span> d.ds_id <span class="keyword">LIKE</span> <span class="string">'TB%'</span>
+            <span class="keyword">AND EXISTS</span> (
+                <span class="keyword">SELECT</span> 1 <span class="keyword">FROM</span> tb_open_dscol
+                <span class="keyword">WHERE</span> ds_id = d.ds_id
+                    <span class="keyword">AND</span> addr_cd <span class="keyword">IN</span> (<span class="string">'LOTN'</span>, <span class="string">'ROAD'</span>, <span class="string">'ADDR'</span>, <span class="string">'ZIP5'</span>)
+            )
+            <span class="keyword">AND EXISTS</span> (
+                <span class="keyword">SELECT</span> 1 <span class="keyword">FROM</span> information_schema.columns
+                <span class="keyword">WHERE</span> table_schema = lower(d.owner_cd)
+                    <span class="keyword">AND</span> table_name = lower(d.ds_id)
+                    <span class="keyword">AND</span> column_name = <span class="string">'no'</span>
+            );
+<span class="keyword">BEGIN</span>
+    <span class="comment">-- 1. 작업 기준일 설정</span>
+    <span class="keyword">IF</span> (length(trim(p_date)) = 8) <span class="keyword">THEN</span>
+        var_work_ym := substr(p_date, 1, 6);
+    <span class="keyword">ELSE</span>
+        var_work_ym := to_char(<span class="keyword">CURRENT_TIMESTAMP</span>, <span class="string">'YYYYMM'</span>);
+    <span class="keyword">END IF</span>;
+
+    p_retmsg := var_work_ym || <span class="string">' start. '</span>;
+    <span class="keyword">RAISE NOTICE</span> <span class="string">'%'</span>, p_retmsg;
+
+    <span class="comment">-- 초기 로그 기록</span>
+    <span class="keyword">INSERT INTO</span> tb_log_job (job_no, job_nm, job_tag, source, target, rowcount, message, reg_dttm)
+    <span class="keyword">VALUES</span> (nextval(<span class="string">'sq_log_job'</span>), v_job_name, <span class="string">'START'</span>, <span class="string">'TB_OPEN_DS*'</span>, <span class="string">'TB_STAT_REFINE'</span>, 0, p_retmsg, <span class="keyword">CURRENT_TIMESTAMP</span>);
+
+    <span class="comment">-- 2. 기존 통계 삭제</span>
+    <span class="keyword">DELETE FROM</span> tb_stat_refine <span class="keyword">WHERE</span> yyyymm = var_work_ym;
+
+    <span class="comment">-- 3. 데이터 셋별 루프</span>
+    <span class="keyword">FOR</span> r_cur <span class="keyword">IN</span> c_cur <span class="keyword">LOOP</span>
+        <span class="comment">-- 시군구 컬럼(sigun_cd) 존재 여부 확인</span>
+        <span class="keyword">SELECT</span> count(*) <span class="keyword">INTO</span> var_col_cnt
+        <span class="keyword">FROM</span> information_schema.columns
+        <span class="keyword">WHERE</span> table_schema = lower(r_cur.owner_cd)
+            <span class="keyword">AND</span> table_name = lower(r_cur.ds_id)
+            <span class="keyword">AND</span> column_name = <span class="string">'sigun_cd'</span>;
+
+<span class="added-line">        <span class="comment">-- 🟢 [수정 3] refine_zip 컬럼명 결정 (refine_zip_cd or refine_zipno)</span></span>
+<span class="added-line">        <span class="keyword">SELECT</span></span>
+<span class="added-line">            <span class="keyword">CASE</span></span>
+<span class="added-line">                <span class="keyword">WHEN</span> MAX(<span class="keyword">CASE WHEN</span> column_name = <span class="string">'refine_zip_cd'</span> <span class="keyword">THEN</span> 1 <span class="keyword">END</span>) = 1 <span class="keyword">THEN</span> <span class="string">'refine_zip_cd'</span></span>
+<span class="added-line">                <span class="keyword">WHEN</span> MAX(<span class="keyword">CASE WHEN</span> column_name = <span class="string">'refine_zipno'</span> <span class="keyword">THEN</span> 1 <span class="keyword">END</span>) = 1 <span class="keyword">THEN</span> <span class="string">'refine_zipno'</span></span>
+<span class="added-line">                <span class="keyword">ELSE NULL</span></span>
+<span class="added-line">            <span class="keyword">END INTO</span> v_zip_col</span>
+<span class="added-line">        <span class="keyword">FROM</span> information_schema.columns</span>
+<span class="added-line">        <span class="keyword">WHERE</span> table_schema = lower(r_cur.owner_cd)</span>
+<span class="added-line">          <span class="keyword">AND</span> table_name = lower(r_cur.ds_id)</span>
+<span class="added-line">          <span class="keyword">AND</span> column_name <span class="keyword">IN</span> (<span class="string">'refine_zip_cd'</span>, <span class="string">'refine_zipno'</span>);</span>
+
+        v_source := r_cur.ds_id;
+
+        <span class="comment">-- 동적 쿼리 생성 (표준 CASE/COALESCE 사용)</span>
+        var_sql := <span class="string">'INSERT INTO tb_stat_refine (yyyymm, sigun_cd, ds_id, tot_cnt, '</span>
+                || <span class="string">'refine_val_cnt, refine_lotn_cnt, refine_road_cnt, refine_zip_cnt, refine_err_cnt, refine_wr_cnt, refine_proc_sec, refine_per, '</span>
+                || <span class="string">'coord_val_cnt, coord_err_cnt, coord_per, refine_dttm, reg_dttm) '</span>
+                || <span class="string">'SELECT $1, '</span> || <span class="keyword">CASE WHEN</span> var_col_cnt > 0 <span class="keyword">THEN</span> <span class="string">'sigun_cd'</span> <span class="keyword">ELSE</span> <span class="string">'''41000'''</span> <span class="keyword">END</span> || <span class="string">', $2, COUNT(*), '</span>
+                || <span class="string">'COALESCE(SUM(CASE WHEN refine_reslt_cd IN (''H'', ''I'', ''G'', ''6'', ''8'', ''E'') THEN 1 ELSE 0 END), 0), '</span>
+                || <span class="string">'COALESCE(SUM(CASE WHEN refine_reslt_cd IN (''H'', ''I'', ''6'', ''8'', ''E'') THEN 1 ELSE 0 END), 0), '</span>
+                || <span class="string">'COALESCE(SUM(CASE WHEN refine_reslt_cd IN (''H'', ''I'', ''G'') THEN 1 ELSE 0 END), 0), '</span>
+<span class="modified-line">                || <span class="string">'COALESCE(SUM(CASE WHEN ('</span> || <span class="modified">COALESCE(v_zip_col, <span class="string">'NULL'</span>)</span> || <span class="string">' IS NOT NULL AND length('</span> || <span class="modified">COALESCE(v_zip_col, <span class="string">'NULL'</span>)</span> || <span class="string">') = 5) THEN 1 ELSE 0 END), 0), '</span>   <span class="comment">-- 🟡 [수정 4]</span></span>
+                || <span class="string">'COALESCE(SUM(CASE WHEN refine_reslt_cd NOT IN (''H'', ''I'', ''G'', ''6'', ''8'', ''E'') THEN 1 ELSE 0 END), 0), '</span>
+                || <span class="string">'COALESCE(SUM(CASE WHEN refine_state_cd NOT IN (''S'', ''F'') THEN 1 ELSE 0 END), 0), '</span>
+                || <span class="string">'CASE WHEN COALESCE(SUM(CASE WHEN refine_state_cd NOT IN (''S'', ''F'') THEN 1 ELSE 0 END), 0) > 0 THEN -1 '</span>
+                || <span class="string">'     ELSE COALESCE(EXTRACT(EPOCH FROM (MAX(refine_dtm) - MIN(refine_dtm))), -1) END, '</span>
+                || <span class="string">'0.0, '</span>
+                || <span class="string">'COALESCE(SUM(CASE WHEN refine_state_cd = ''S'' THEN 1 ELSE 0 END), 0), '</span>
+                || <span class="string">'COALESCE(SUM(CASE WHEN refine_state_cd = ''F'' THEN 1 ELSE 0 END), 0), '</span>
+                || <span class="string">'0.0, MAX(refine_dtm), CURRENT_TIMESTAMP '</span>
+<span class="modified-line">                || <span class="string">'FROM '</span> || quote_ident(<span class="modified">lower(r_cur.owner_cd)</span>) || <span class="string">'.'</span> || quote_ident(<span class="modified">lower(r_cur.ds_id)</span>);   <span class="comment">-- 🟡 [수정 1]</span></span>
+
+        <span class="keyword">IF</span> var_col_cnt > 0 <span class="keyword">THEN</span>
+            var_sql := var_sql || <span class="string">' WHERE sigun_cd IS NOT NULL AND sigun_cd &lt;&gt; ''41000'' GROUP BY sigun_cd'</span>;
+        <span class="keyword">ELSE</span>
+            var_sql := var_sql || <span class="string">' GROUP BY 1, 2'</span>;
+        <span class="keyword">END IF</span>;
+
+        <span class="keyword">EXECUTE</span> var_sql <span class="keyword">USING</span> var_work_ym, r_cur.ds_id;
+
+        <span class="comment">-- 시군별 처리가 끝난 후 경기도 통합(41000) 데이터가 없는 경우 추가 로직 필요 (Oracle 원본 로직 유지)</span>
+        <span class="keyword">IF</span> var_col_cnt > 0 <span class="keyword">THEN</span>
+            <span class="keyword">EXECUTE</span> <span class="string">'INSERT INTO tb_stat_refine (...) SELECT $1, ''41000'', ...'</span> <span class="keyword">USING</span> var_work_ym, r_cur.ds_id;
+        <span class="keyword">END IF</span>;
+
+        v_rowcount := v_rowcount + 1;
+    <span class="keyword">END LOOP</span>;
+
+    <span class="comment">-- 4. 정제율 및 좌표 변환율 업데이트</span>
+    <span class="keyword">UPDATE</span> tb_stat_refine
+    <span class="keyword">SET</span> refine_per = <span class="keyword">CASE WHEN</span> tot_cnt > 0 <span class="keyword">THEN</span> round((refine_val_cnt::<span class="keyword">NUMERIC</span> * 100) / tot_cnt, 2) <span class="keyword">ELSE</span> 0.0 <span class="keyword">END</span>,
+        coord_per = <span class="keyword">CASE WHEN</span> tot_cnt > 0 <span class="keyword">THEN</span> round((coord_val_cnt::<span class="keyword">NUMERIC</span> * 100) / tot_cnt, 2) <span class="keyword">ELSE</span> 0.0 <span class="keyword">END</span>
+    <span class="keyword">WHERE</span> yyyymm = var_work_ym;
+
+    <span class="comment">-- 특정 테이블명 보정</span>
+    <span class="keyword">UPDATE</span> tb_stat_refine <span class="keyword">SET</span> ds_id = <span class="string">'TV_CTYPARK_M'</span> <span class="keyword">WHERE</span> ds_id = <span class="string">'TB_CTYPARK_M'</span> <span class="keyword">AND</span> yyyymm = var_work_ym;
+    <span class="keyword">UPDATE</span> tb_stat_refine <span class="keyword">SET</span> ds_id = <span class="string">'TV_CCTV_M'</span> <span class="keyword">WHERE</span> ds_id = <span class="string">'TB_CCTV_M'</span> <span class="keyword">AND</span> yyyymm = var_work_ym;
+
+    p_retmsg := var_work_ym || <span class="string">'월 주소정제 통계 현황 생성 '</span> || v_rowcount::<span class="keyword">VARCHAR</span> || <span class="string">' 건 success. '</span>;
+    <span class="keyword">RAISE NOTICE</span> <span class="string">'%'</span>, p_retmsg;
+
+    <span class="comment">-- 완료 로그 기록</span>
+    <span class="keyword">INSERT INTO</span> tb_log_job (job_no, job_nm, job_tag, source, target, rowcount, message, reg_dttm)
+    <span class="keyword">VALUES</span> (nextval(<span class="string">'sq_log_job'</span>), v_job_name, <span class="string">'SUCC'</span>, <span class="string">'TB_OPEN_DS*'</span>, <span class="string">'TB_STAT_REFINE'</span>, v_rowcount, p_retmsg, <span class="keyword">CURRENT_TIMESTAMP</span>);
+
+<span class="keyword">EXCEPTION</span>
+    <span class="keyword">WHEN OTHERS THEN</span>
+        <span class="keyword">GET STACKED DIAGNOSTICS</span> p_retmsg = MESSAGE_TEXT;
+        <span class="keyword">INSERT INTO</span> tb_log_job (job_no, job_nm, job_tag, source, target, rowcount, message, reg_dttm)
+        <span class="keyword">VALUES</span> (nextval(<span class="string">'sq_log_job'</span>), v_job_name, <span class="string">'FAIL'</span>, <span class="string">'TB_OPEN_DS*'</span>, <span class="string">'TB_STAT_REFINE'</span>, 0, p_retmsg, <span class="keyword">CURRENT_TIMESTAMP</span>);
+        <span class="keyword">RAISE EXCEPTION</span> <span class="string">'프로시저 오류: %'</span>, p_retmsg;
+<span class="keyword">END</span>;
+$function$;</div>
+
+        <p style="font-size:12px; color:#666; margin-top:8px;">
+          <strong>변경 위치 4곳:</strong>
+          <br>🟢 <strong>[수정 2]</strong> DECLARE 섹션에 <code>v_zip_col TEXT;</code> 한 줄 추가
+          <br>🟢 <strong>[수정 3]</strong> sigun_cd 체크 다음에 v_zip_col 결정 코드 10줄 추가
+          <br>🟡 <strong>[수정 4]</strong> 동적 SQL 의 <code>refine_zip_cd</code> 하드코딩 → <code>v_zip_col</code> 변수 사용
+          <br>🟡 <strong>[수정 1]</strong> FROM 절의 <code>quote_ident(r_cur.xxx)</code> → <code>quote_ident(lower(r_cur.xxx))</code>
+        </p>
 
         <div class="fix-box"><strong>2026-05-28</strong> &mdash; <code>gdpslptl.sp_stat_refine</code>: 대소문자 + 컬럼명 혼재 (refine_zip_cd vs refine_zipno) 동적 처리 / 적용 예정</div>
       </div>
