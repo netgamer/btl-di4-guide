@@ -79,6 +79,28 @@
   .sql-copy-block .copy-btn.copied { background: #2e7d32; }
   .sql-copy-label { font-size: 12px; color: #455a64; margin-bottom: 6px; font-weight: bold; }
 
+  /* 검색 박스 */
+  .search-container {
+    position: sticky; top: 0; z-index: 100;
+    background: #1a237e; padding: 12px 16px; border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15); margin: 16px 0;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .search-container input[type="text"] {
+    flex: 1; padding: 8px 12px; border: none; border-radius: 4px;
+    font-size: 14px; font-family: inherit;
+  }
+  .search-container .search-stats { color: white; font-size: 12px; min-width: 130px; }
+  .search-container .clear-btn {
+    background: rgba(255,255,255,0.2); color: white; border: none;
+    padding: 6px 12px; border-radius: 4px; font-size: 12px; cursor: pointer;
+  }
+  .search-container .clear-btn:hover { background: rgba(255,255,255,0.3); }
+
+  mark.search-hl { background: #fff176; padding: 1px 2px; border-radius: 2px; }
+  .case-card.search-hidden { display: none; }
+  .summary-box tr.search-hidden { display: none; }
+
   .change-table { font-size: 12px; border-collapse: collapse; width: 100%; margin: 10px 0; }
   .change-table th { background: #e8eaf6; padding: 6px 10px; border: 1px solid #ccc; text-align: left; }
   .change-table td { padding: 6px 10px; border: 1px solid #ccc; }
@@ -111,6 +133,137 @@ function copySql(btn) {
     alert('복사 실패. textarea 안에서 Ctrl+A → Ctrl+C 로 직접 복사하세요.');
   }
 }
+
+// 페이지 내 검색 - 케이스/요약 표 필터 + 하이라이트
+function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function removeHighlights() {
+  document.querySelectorAll('mark.search-hl').forEach(function(m) {
+    var parent = m.parentNode;
+    parent.replaceChild(document.createTextNode(m.textContent), m);
+    parent.normalize();
+  });
+}
+
+function highlightText(root, regex) {
+  var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: function(node) {
+      var p = node.parentElement;
+      if (!p) return NodeFilter.FILTER_REJECT;
+      var tag = p.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA' || tag === 'MARK') return NodeFilter.FILTER_REJECT;
+      if (p.closest('.search-container')) return NodeFilter.FILTER_REJECT;
+      return regex.test(node.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    }
+  });
+  var nodes = [];
+  var n;
+  while ((n = walker.nextNode())) nodes.push(n);
+  nodes.forEach(function(node) {
+    var text = node.nodeValue;
+    var frag = document.createDocumentFragment();
+    var last = 0;
+    var m;
+    regex.lastIndex = 0;
+    while ((m = regex.exec(text)) !== null) {
+      if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
+      var mark = document.createElement('mark');
+      mark.className = 'search-hl';
+      mark.textContent = m[0];
+      frag.appendChild(mark);
+      last = m.index + m[0].length;
+      if (m.index === regex.lastIndex) regex.lastIndex++;
+    }
+    if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+    node.parentNode.replaceChild(frag, node);
+  });
+}
+
+function getCaseText(card) {
+  // textarea 내용도 검색 대상에 포함
+  var text = card.textContent || '';
+  card.querySelectorAll('textarea').forEach(function(ta) { text += ' ' + ta.value; });
+  return text.toLowerCase();
+}
+
+function applySearch() {
+  var q = document.getElementById('search-input').value.trim();
+  var stats = document.getElementById('search-stats');
+
+  removeHighlights();
+
+  if (!q) {
+    document.querySelectorAll('.case-card').forEach(function(c) { c.classList.remove('search-hidden'); });
+    document.querySelectorAll('.summary-box tr').forEach(function(r) { r.classList.remove('search-hidden'); });
+    document.querySelectorAll('.case-body').forEach(function(b) {
+      b.classList.remove('open');
+      var t = b.previousElementSibling && b.previousElementSibling.querySelector('.case-toggle');
+      if (t) t.textContent = '+';
+    });
+    stats.textContent = '';
+    return;
+  }
+
+  var qLower = q.toLowerCase();
+  var matched = 0;
+  document.querySelectorAll('.case-card').forEach(function(card) {
+    var text = getCaseText(card);
+    if (text.indexOf(qLower) !== -1) {
+      card.classList.remove('search-hidden');
+      // 자동 펼치기
+      var body = card.querySelector('.case-body');
+      if (body) {
+        body.classList.add('open');
+        var toggle = body.previousElementSibling && body.previousElementSibling.querySelector('.case-toggle');
+        if (toggle) toggle.textContent = '-';
+      }
+      matched++;
+    } else {
+      card.classList.add('search-hidden');
+    }
+  });
+
+  // 요약표 행도 필터
+  document.querySelectorAll('.summary-box table tr').forEach(function(row, idx) {
+    if (idx === 0) return; // header
+    var t = (row.textContent || '').toLowerCase();
+    if (t.indexOf(qLower) !== -1) row.classList.remove('search-hidden');
+    else row.classList.add('search-hidden');
+  });
+
+  // 하이라이트
+  try {
+    var regex = new RegExp(escapeRegex(q), 'gi');
+    document.querySelectorAll('.case-card:not(.search-hidden), .summary-box, .info-box, .warn-box').forEach(function(el) {
+      highlightText(el, regex);
+    });
+  } catch (e) { /* ignore */ }
+
+  stats.textContent = matched + ' 건 매칭';
+}
+
+function clearSearch() {
+  document.getElementById('search-input').value = '';
+  applySearch();
+  document.getElementById('search-input').focus();
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  // Ctrl+F 또는 / 로 검색 포커스
+  document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+      e.preventDefault();
+      var inp = document.getElementById('search-input');
+      if (inp) { inp.focus(); inp.select(); }
+    } else if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+      e.preventDefault();
+      var inp = document.getElementById('search-input');
+      if (inp) inp.focus();
+    } else if (e.key === 'Escape' && document.activeElement.id === 'search-input') {
+      clearSearch();
+    }
+  });
+});
 </script>
 </head>
 <body>
@@ -126,6 +279,17 @@ function copySql(btn) {
   <strong>운영 서버:</strong> <code>172.17.11.206:5444</code> / DB: <code>dbpgdp</code> / User: <code>btluser</code> / BTL 메타 스키마: <code>postgres_us_btlapp</code>
   &nbsp;|&nbsp;
   <strong>개발 서버:</strong> <code>192.168.30.78:5432</code> / BTL 메타 스키마: <code>btldi</code>
+</div>
+
+<!-- 검색 박스 -->
+<div class="search-container">
+  <span style="color:white; font-size:13px; font-weight:bold;">🔍 검색</span>
+  <input id="search-input" type="text" placeholder="잡 이름 / 에러 코드 / 컬럼명 등 입력 (예: J_SW_TB_HGRIV_DISTRCT_RAFAL_OBSVT, EL10731, FRC_DOG_YN)" oninput="applySearch()" autocomplete="off">
+  <span id="search-stats" class="search-stats"></span>
+  <button class="clear-btn" onclick="clearSearch()">초기화</button>
+</div>
+<div style="font-size:11px; color:#666; margin: -10px 0 14px 4px;">
+  💡 단축키: <code>Ctrl+F</code> 또는 <code>/</code> 누르면 검색 포커스, <code>Esc</code> 로 초기화
 </div>
 
 <div class="main-content">
