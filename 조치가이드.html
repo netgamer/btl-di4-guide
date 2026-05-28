@@ -404,6 +404,68 @@ FROM
           </table>
           <div class="fix-box"><strong>2026-05-28</strong> — 운영 적용 예정</div>
         </div>
+
+        <div class="section"><h4>적용 사례 2: <code>J_TB_KIDSCAFE_C_01</code> (ref=46976) — 5개 날짜 컬럼 동시</h4>
+          <p>키즈카페 잡 — 5개 날짜 컬럼이 같은 패턴 (소스 형식 혼재). <code>'2019-02-13'</code> 형식과 <code>'20140410'</code> 형식이 데이터에 섞여 있어 둘 다 변환 필요.</p>
+          <div class="warn-box" style="margin-bottom:8px;">⚠️ 이 SQL 은 <strong><code>J_TB_KIDSCAFE_C_01</code> 잡 전용</strong>입니다. (소스: <code>gdpcl.tb_kidscafe_c</code>)</div>
+          <p class="sql-copy-label">수정 후 SQL — 추출 노드의 SQL 수동 입력 칸에 붙여넣기:</p>
+          <div class="sql-copy-block">
+<textarea readonly>SELECT
+  tb_kidscafe_c.SIGUN_NM AS SIGUN_NM,
+  tb_kidscafe_c.SIGUN_CD AS SIGUN_CD,
+  tb_kidscafe_c.BIZPLC_NM AS BIZPLC_NM,
+  tb_kidscafe_c.LOCPLC_LOTNO_ADDR AS LOCPLC_LOTNO_ADDR,
+  tb_kidscafe_c.LOCPLC_ROADNM_ADDR AS LOCPLC_ROADNM_ADDR,
+  REPLACE(tb_kidscafe_c.LICENSG_DE, '-', '') AS LICENSG_YMD,
+  tb_kidscafe_c.BSN_STATE_NM AS BSN_STATE_NM,
+  REPLACE(tb_kidscafe_c.CLSBIZ_DE, '-', '') AS CLSBIZ_YMD,
+  REPLACE(tb_kidscafe_c.SUSPNBIZ_BEGIN_DE, '-', '') AS TCBIZ_BGNG_YMD,
+  REPLACE(tb_kidscafe_c.SUSPNBIZ_END_DE, '-', '') AS TCBIZ_END_YMD,
+  REPLACE(tb_kidscafe_c.REOPENBIZ_DE, '-', '') AS REOPENBIZ_YMD,
+  tb_kidscafe_c.LOCPLC_AR AS LOCPLC_AR,
+  tb_kidscafe_c.LOCPLC_ZIP_CD AS LOCPLC_ZIPNO,
+  tb_kidscafe_c.BULDNG_POSESN_DIV_NM AS BULDNG_POSESN_DIV_NM,
+  tb_kidscafe_c.GRAD_FACLT_DIV_NM AS RK_CNT_FACLT_DIV_NM,
+  tb_kidscafe_c.YY AS YR,
+  tb_kidscafe_c.MULTI_USE_BIZESTBL_YN AS MULTI_UTLZ_BIZEST_YN,
+  tb_kidscafe_c.TOT_FACLT_SCALE AS TOT_FACLT_SCALE,
+  tb_kidscafe_c.SANITTN_INDUTYPE_NM AS SANITTN_INDUTYPE_NM,
+  tb_kidscafe_c.SANITTN_BIZCOND_NM AS SANITTN_BIZCOND_NM,
+  tb_kidscafe_c.TOT_EMPLY_CNT AS TOT_EMPLY_CNT,
+  tb_kidscafe_c.data_colct_de AS DATA_COLCT_DE,
+  'N' AS APRV_YN,
+  CURRENT_TIMESTAMP AS ETL_LDADNG_DTM,
+  tb_kidscafe_c.REFINE_LOTNO_ADDR AS REFINE_LOTNO_ADDR,
+  tb_kidscafe_c.refine_road_nm_addr AS REFINE_ROADNM_ADDR,
+  tb_kidscafe_c.REFINE_ZIP_CD AS REFINE_ZIP_CD,
+  tb_kidscafe_c.REFINE_WGS84_LOGT AS REFINE_WGS84_LOGT,
+  tb_kidscafe_c.REFINE_WGS84_LAT AS REFINE_WGS84_LAT,
+  tb_kidscafe_c.refine_mng_no AS REFINE_MANAGE_NO,
+  tb_kidscafe_c.REFINE_RESLT_CD AS REFINE_RESLT_CD,
+  tb_kidscafe_c.REFINE_ADDR_DIV_CD AS REFINE_ADDR_DIV_CD,
+  tb_kidscafe_c.REFINE_SYS_DIV_CD AS REFINE_SYS_DIV_CD,
+  tb_kidscafe_c.REFINE_DTM AS REFINE_DTM,
+  tb_kidscafe_c.REFINE_STATE_CD AS REFINE_STATE_CD,
+  tb_kidscafe_c.REFINE_NOADMIT_YN AS REFINE_NOADMIT_YN,
+  tb_kidscafe_c.MANAGE_ID AS MANAGE_ID
+FROM
+  gdpcl.tb_kidscafe_c tb_kidscafe_c</textarea>
+            <button class="copy-btn" onclick="copySql(this)">복사</button>
+          </div>
+          <table class="change-table">
+            <tr><th>#</th><th>변경 전</th><th>변경 후</th></tr>
+            <tr><td>1</td><td><code>LICENSG_DE AS LICENSG_YMD</code></td><td><code>REPLACE(LICENSG_DE, '-', '') AS LICENSG_YMD</code></td></tr>
+            <tr><td>2</td><td><code>CLSBIZ_DE AS CLSBIZ_YMD</code></td><td><code>REPLACE(CLSBIZ_DE, '-', '') AS CLSBIZ_YMD</code></td></tr>
+            <tr><td>3</td><td><code>SUSPNBIZ_BEGIN_DE AS TCBIZ_BGNG_YMD</code></td><td><code>REPLACE(SUSPNBIZ_BEGIN_DE, '-', '') AS TCBIZ_BGNG_YMD</code></td></tr>
+            <tr><td>4</td><td><code>SUSPNBIZ_END_DE AS TCBIZ_END_YMD</code></td><td><code>REPLACE(SUSPNBIZ_END_DE, '-', '') AS TCBIZ_END_YMD</code></td></tr>
+            <tr><td>5</td><td><code>REOPENBIZ_DE AS REOPENBIZ_YMD</code></td><td><code>REPLACE(REOPENBIZ_DE, '-', '') AS REOPENBIZ_YMD</code></td></tr>
+          </table>
+          <div class="warn-box">
+            소스 데이터에 <code>'2019-02-13'</code> (10자) 과 <code>'20140410'</code> (8자) 이 혼재.
+            <code>REPLACE(..., '-', '')</code> 가 두 케이스 모두 처리 (하이픈 없는 데이터는 변화 없음, 하이픈 있는 데이터는 제거됨).
+          </div>
+          <div class="fix-box"><strong>2026-05-28</strong> — 운영 적용 예정</div>
+        </div>
       </div>
     </div>
   </div>
