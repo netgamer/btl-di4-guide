@@ -1,0 +1,660 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BTL DI 4 운영 조치 가이드</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; background: #f5f5f5; color: #333; line-height: 1.6; }
+
+  .header { background: #1a237e; color: white; padding: 30px 40px; }
+  .header h1 { font-size: 24px; margin-bottom: 5px; }
+  .header p { font-size: 14px; opacity: 0.8; }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 20px; }
+
+  .main-content { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-top: 20px; }
+
+  .summary-box { background: white; border-radius: 8px; padding: 20px 25px; margin: 20px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+  .summary-box h2 { font-size: 16px; color: #1a237e; margin-bottom: 12px; border-bottom: 2px solid #1a237e; padding-bottom: 8px; }
+  .summary-box table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .summary-box th { background: #e8eaf6; text-align: left; padding: 8px 12px; border: 1px solid #ddd; }
+  .summary-box td { padding: 8px 12px; border: 1px solid #ddd; }
+  .summary-box tr:hover { background: #f5f5f5; }
+  .summary-box a { color: #1a237e; text-decoration: none; font-weight: bold; }
+  .summary-box a:hover { text-decoration: underline; }
+
+  .category-title { background: #37474f; color: white; padding: 12px 25px; border-radius: 8px 8px 0 0; margin-top: 30px; font-size: 15px; }
+
+  .case-card { background: white; border-radius: 0 0 8px 8px; margin: 0 0 2px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); overflow: hidden; }
+  .case-card:last-of-type { border-radius: 0 0 8px 8px; margin-bottom: 20px; }
+  .case-header { padding: 15px 25px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; }
+  .case-header:hover { background: #f9f9f9; }
+  .case-header h3 { font-size: 14px; }
+  .case-tag { display: inline-block; padding: 2px 10px; border-radius: 12px; font-size: 11px; font-weight: bold; color: white; margin-right: 8px; }
+  .tag-resolved { background: #2e7d32; }
+  .tag-pending { background: #e65100; }
+  .tag-info { background: #1565c0; }
+  .case-toggle { font-size: 18px; color: #999; }
+
+  .case-body { padding: 0 25px 20px; display: none; }
+  .case-body.open { display: block; }
+
+  .section { margin: 15px 0; }
+  .section h4 { font-size: 13px; color: #666; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+
+  .error-box { background: #fff3f3; border-left: 4px solid #d32f2f; padding: 12px 15px; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; margin: 5px 0; }
+  .fix-box { background: #f1f8e9; border-left: 4px solid #2e7d32; padding: 12px 15px; font-size: 13px; margin: 5px 0; }
+  .warn-box { background: #fff8e1; border-left: 4px solid #f57f17; padding: 12px 15px; font-size: 13px; margin: 5px 0; }
+  .info-box { background: #e3f2fd; border-left: 4px solid #1565c0; padding: 12px 15px; font-size: 13px; margin: 5px 0; }
+
+  pre.sql { background: #263238; color: #eeffff; padding: 15px; border-radius: 4px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
+  pre.sql .comment { color: #546e7a; }
+  pre.sql .keyword { color: #89ddff; }
+  pre.sql .string { color: #c3e88d; }
+
+  .step { display: flex; margin: 8px 0; }
+  .step-num { background: #1a237e; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; flex-shrink: 0; margin-right: 10px; margin-top: 2px; }
+  .step-content { flex: 1; font-size: 13px; }
+
+  .prod-info { background: #e3f2fd; padding: 10px 15px; border-radius: 4px; font-size: 12px; margin: 10px 0; }
+  .prod-info code { background: #bbdefb; padding: 1px 5px; border-radius: 3px; }
+
+  /* 복사용 SQL 블록 - textarea 사용 (개행 보존) */
+  .sql-copy-block { position: relative; margin: 10px 0; }
+  .sql-copy-block textarea {
+    width: 100%; background: #263238; color: #eeffff;
+    border: none; padding: 15px; border-radius: 4px;
+    font-family: 'Consolas', 'Courier New', monospace; font-size: 12px;
+    line-height: 1.5; resize: vertical; min-height: 100px;
+    white-space: pre; tab-size: 2;
+  }
+  .sql-copy-block .copy-btn {
+    position: absolute; top: 8px; right: 8px;
+    background: #455a64; color: white; border: none;
+    padding: 5px 12px; border-radius: 3px; font-size: 11px; cursor: pointer;
+  }
+  .sql-copy-block .copy-btn:hover { background: #607d8b; }
+  .sql-copy-block .copy-btn.copied { background: #2e7d32; }
+  .sql-copy-label { font-size: 12px; color: #455a64; margin-bottom: 6px; font-weight: bold; }
+
+  .change-table { font-size: 12px; border-collapse: collapse; width: 100%; margin: 10px 0; }
+  .change-table th { background: #e8eaf6; padding: 6px 10px; border: 1px solid #ccc; text-align: left; }
+  .change-table td { padding: 6px 10px; border: 1px solid #ccc; }
+  .change-table code { background: #f5f5f5; padding: 1px 4px; border-radius: 2px; font-size: 11px; }
+
+  .footer { text-align: center; padding: 30px; font-size: 12px; color: #999; }
+</style>
+<script>
+function toggleCase(id) {
+  var body = document.getElementById(id);
+  var toggle = body.previousElementSibling.querySelector('.case-toggle');
+  if (body.classList.contains('open')) { body.classList.remove('open'); toggle.textContent = '+'; }
+  else { body.classList.add('open'); toggle.textContent = '-'; }
+}
+function expandAll() { document.querySelectorAll('.case-body').forEach(function(el) { el.classList.add('open'); el.previousElementSibling.querySelector('.case-toggle').textContent = '-'; }); }
+function collapseAll() { document.querySelectorAll('.case-body').forEach(function(el) { el.classList.remove('open'); el.previousElementSibling.querySelector('.case-toggle').textContent = '+'; }); }
+function copySql(btn) {
+  var ta = btn.previousElementSibling;
+  ta.select();
+  ta.setSelectionRange(0, 99999);
+  try {
+    document.execCommand('copy');
+    btn.classList.add('copied');
+    btn.textContent = '복사됨!';
+    setTimeout(function() {
+      btn.classList.remove('copied');
+      btn.textContent = '복사';
+    }, 1500);
+  } catch (e) {
+    alert('복사 실패. textarea 안에서 Ctrl+A → Ctrl+C 로 직접 복사하세요.');
+  }
+}
+</script>
+</head>
+<body>
+
+<div class="header">
+  <h1>BTL DI 4 운영 조치 가이드</h1>
+  <p>Oracle &rarr; PostgreSQL 이관 후 워크플랜 에러 수정 이력 &amp; 가이드 | 최종 수정: 2026-05-28</p>
+</div>
+
+<div class="container">
+
+<div class="prod-info">
+  <strong>운영 서버:</strong> <code>172.17.11.206:5444</code> / DB: <code>dbpgdp</code> / User: <code>btluser</code> / BTL 메타 스키마: <code>postgres_us_btlapp</code>
+  &nbsp;|&nbsp;
+  <strong>개발 서버:</strong> <code>192.168.30.78:5432</code> / BTL 메타 스키마: <code>btldi</code>
+</div>
+
+<div class="main-content">
+
+  <div class="info-box">
+    <strong>원칙:</strong> 모든 잡/모델/접속 수정은 <strong>BTL DI 4 Designer 에서 직접 진행</strong>합니다.
+    DB 쿼리로 직접 수정하는 방식은 사용하지 않습니다 (정말 Designer 로 불가능한 경우만 예외 — 예: DB routine FUNCTION/PROCEDURE 정의 충돌).
+    <br><strong>이유:</strong> 1) 변경 이력이 BTL 시스템에 정상 기록됨, 2) revision 충돌 방지, 3) 운영 표준 절차 준수.
+  </div>
+
+  <div class="summary-box">
+    <h2>케이스 목록 &nbsp; <span style="font-size:12px; font-weight:normal;">
+      [<a href="javascript:expandAll()">전체 펼치기</a>]
+      [<a href="javascript:collapseAll()">전체 접기</a>]
+    </span></h2>
+    <table>
+      <tr><th style="width:50px">상태</th><th style="width:80px">분류</th><th style="width:110px">에러 코드</th><th>에러 유형</th><th style="width:70px">링크</th></tr>
+      <tr style="background:#f0f0f0"><td colspan="5"><strong>잡 에러 (추출 노드 SQL / 모델 수정)</strong></td></tr>
+      <tr><td><span class="case-tag tag-resolved">해결</span></td><td>잡 DML</td><td>EL10731</td><td>value too long for type character(1) &mdash; 리터럴 오류</td><td><a href="#new-j1">J-1</a></td></tr>
+      <tr><td><span class="case-tag tag-resolved">해결</span></td><td>잡 DML</td><td>EL10714</td><td>CASE 키워드 누락 / 컬럼 prefix 누락</td><td><a href="#new-j2">J-2</a></td></tr>
+      <tr><td><span class="case-tag tag-resolved">해결</span></td><td>잡 DML</td><td>SQL 42883</td><td>TO_CHAR 함수명이 컬럼명으로 치환됨</td><td><a href="#new-j3">J-3</a></td></tr>
+      <tr><td><span class="case-tag tag-resolved">해결</span></td><td>잡 모델</td><td>EL10741</td><td>필드가 모델에 존재하지 않음</td><td><a href="#new-j4">J-4</a></td></tr>
+      <tr style="background:#f0f0f0"><td colspan="5"><strong>SQL 실행 / 접속 에러 (Connection 속성 / DB routine)</strong></td></tr>
+      <tr><td><span class="case-tag tag-resolved">해결</span></td><td>DB routine</td><td>SQL 42809</td><td>"xxx is a procedure" — FUNCTION/PROCEDURE 충돌 (예외: SQL 처리)</td><td><a href="#new-s1">S-1</a></td></tr>
+      <tr><td><span class="case-tag tag-resolved">해결</span></td><td>접속</td><td>SQL 42704</td><td>role "postgres" does not exist — 접속 계정 불일치</td><td><a href="#new-s2">S-2</a></td></tr>
+    </table>
+  </div>
+
+  <!-- ===== 새 잡 케이스: 일반 수정 절차 ===== -->
+  <div class="info-box">
+    <strong>잡 SQL 수정 일반 절차 (모든 J-* 케이스 공통):</strong>
+    <ol style="margin-left:20px; margin-top:6px;">
+      <li>BTL Designer → 운영 서버 접속 (admin)</li>
+      <li>리포지토리 탐색기에서 <strong>에러 메시지의 잡 이름</strong> 더블클릭 → 잡 편집 화면 열림</li>
+      <li>가운데 <strong>추출 노드</strong> 더블클릭 → 추출 설정 다이얼로그 열림</li>
+      <li>상단 <strong>SQL 탭</strong> 클릭</li>
+      <li><strong>SQL 수동 입력</strong> 체크박스 확인 (이미 체크되어 있음)</li>
+      <li>기존 SQL 전체 선택 (Ctrl+A) → 삭제 → 케이스별 <strong>"수정 후 SQL"</strong> 의 "복사" 버튼 클릭 → SQL 입력 칸에 붙여넣기 (Ctrl+V)</li>
+      <li><strong>확인</strong> 버튼 → 잡 저장 (Ctrl+S)</li>
+      <li>워크플랜 재실행 → 통과 확인 (BTL 서버 재시작 불필요)</li>
+    </ol>
+  </div>
+
+  <div class="warn-box">
+    <strong>⚠️ 매우 중요: 각 "수정 후 SQL" 은 특정 잡 전용입니다!</strong>
+    <ul style="margin-left:20px; margin-top:6px;">
+      <li>각 케이스의 SQL 은 해당 잡 (예: <code>J_TB_ANIMAL_REG_STUS_C_01</code>) 의 <strong>전용 SQL</strong> 입니다.</li>
+      <li>잡마다 소스 테이블, 컬럼 구성이 다르므로 <strong>다른 잡에 붙여넣으면 절대 안 됩니다</strong>. 데이터 손실/오작동 발생.</li>
+      <li>SQL 복사 전 반드시 <strong>잡 이름 + ref_obj 확인</strong> 후 매칭되는 케이스의 SQL 만 사용하세요.</li>
+      <li>예시: <code>tb_animal_reg_stus_c</code> 가 들어간 SQL 은 동물등록 잡 전용. <code>tb_gg_jobaba_recru_st_c</code> 가 들어간 SQL 은 잡아바 채용 잡 전용.</li>
+    </ul>
+  </div>
+
+  <!-- ===== J-1 ===== -->
+  <div class="category-title">잡 에러 — DML 수정</div>
+  <div class="case-card" id="new-j1">
+    <div class="case-header" onclick="toggleCase('new-j1-body')">
+      <h3><span class="case-tag tag-resolved">해결</span> J-1: value too long for type character(1) — 리터럴 오류</h3>
+      <span class="case-toggle">+</span>
+    </div>
+    <div class="case-body" id="new-j1-body">
+      <div class="section"><h4>에러 메시지</h4>
+        <div class="error-box">EL10731 - tb_xxx에서 에러 행의 수가 허용치(0)를 초과하였습니다.
+원인: ERROR: value too long for type character(1) SQLState = 22001</div>
+      </div>
+      <div class="section"><h4>원인</h4>
+        <p>추출 DML 에 <code>'APRV_YN' AS APRV_YN</code> 처럼 컬럼명 자체(7글자 문자열)를 리터럴로 사용. 타겟 컬럼이 character(1) 이라 안 들어감.</p>
+      </div>
+      <div class="section"><h4>BTL Designer 수정 방법</h4>
+        <p>위의 "잡 SQL 수정 일반 절차" 따라가서 SQL 안에서:</p>
+        <table class="change-table">
+          <tr><th>변경 전</th><th>변경 후</th></tr>
+          <tr><td><code>'APRV_YN' AS APRV_YN</code></td><td><code>'N' AS APRV_YN</code></td></tr>
+        </table>
+        <p style="font-size:12px; color:#666;">→ character(1) 컬럼에 들어가도록 1글자 'N' 으로 변경 (Oracle 시절 기본값 'N' 사용)</p>
+      </div>
+      <div class="section"><h4>적용 사례</h4>
+        <div class="fix-box"><strong>2026-05-28</strong> — <code>tb_hgriv_distrct_wtrlvl</code> (ref=42546) / 성공</div>
+        <div class="fix-box"><strong>2026-05-26</strong> — <code>tb_aws_1hour_obser</code> / 성공</div>
+      </div>
+
+      <div class="section"><h4>변형 사례: varchar(8) — 날짜 포맷 불일치</h4>
+        <p>같은 오버플로 에러인데 character(1) 이 아닌 <code>character varying(8)</code> 케이스 — 소스가 <code>2026-03-30</code> (하이픈 포함 10자) 인데 타겟이 varchar(8) (YYYYMMDD 8자).</p>
+        <div class="error-box">EL10731 - tb_xxx에서 에러 행의 수가 허용치(0)를 초과하였습니다.
+원인: ERROR: value too long for type character varying(8) SQLState = 22001</div>
+
+        <div class="section"><h4>적용 사례: <code>J_TB_JOB_FNDTN_EDU_TRAING_C_01</code> (ref=46031)</h4>
+          <div class="warn-box" style="margin-bottom:8px;">⚠️ 이 SQL 은 <strong><code>J_TB_JOB_FNDTN_EDU_TRAING_C_01</code> 잡 전용</strong>입니다. 다른 잡에 붙여넣지 마세요. (소스: <code>gdpcl.tb_job_fndtn_edu_traing_c</code>)</div>
+          <p class="sql-copy-label">수정 후 SQL — 추출 노드의 SQL 수동 입력 칸에 붙여넣기:</p>
+          <div class="sql-copy-block">
+<textarea readonly>SELECT
+  tb_job_fndtn_edu_traing_c.PBLANC_TITLE AS PBANC_TITLE,
+  tb_job_fndtn_edu_traing_c.INST_NM AS INST_NM,
+  REPLACE(tb_job_fndtn_edu_traing_c.RECRUT_BEGIN_DE, '-', '') AS RECRUT_BGNG_YMD,
+  REPLACE(tb_job_fndtn_edu_traing_c.RECRUT_END_DE, '-', '') AS RECRUT_END_YMD,
+  tb_job_fndtn_edu_traing_c.DIV AS DIV,
+  gdpdo.fn_get_link_cd_desc('JOBABA_EDU_TRAING', tb_job_fndtn_edu_traing_c.DIV) AS DIV_NM,
+  tb_job_fndtn_edu_traing_c.REGION_DIV AS REGION_DIV,
+  gdpdo.fn_get_link_cd_desc('JOBABA_REGION_CD', tb_job_fndtn_edu_traing_c.REGION_DIV) AS REGION_NM,
+  tb_job_fndtn_edu_traing_c.DETAIL_PAGE_URL AS DETAIL_PAGE_URL,
+  tb_job_fndtn_edu_traing_c.data_colct_de AS DATA_COLCT_DE,
+  'N' AS APRV_YN,
+  CURRENT_TIMESTAMP AS ETL_LDADNG_DTM
+FROM
+  gdpcl.tb_job_fndtn_edu_traing_c tb_job_fndtn_edu_traing_c</textarea>
+            <button class="copy-btn" onclick="copySql(this)">복사</button>
+          </div>
+          <table class="change-table">
+            <tr><th>#</th><th>변경 전</th><th>변경 후</th><th>이유</th></tr>
+            <tr><td>1</td><td><code>RECRUT_BEGIN_DE AS RECRUT_BGNG_YMD</code></td><td><code>REPLACE(RECRUT_BEGIN_DE, '-', '') AS RECRUT_BGNG_YMD</code></td><td><code>2026-03-30</code> (10자) → <code>20260330</code> (8자)</td></tr>
+            <tr><td>2</td><td><code>RECRUT_END_DE AS RECRUT_END_YMD</code></td><td><code>REPLACE(RECRUT_END_DE, '-', '') AS RECRUT_END_YMD</code></td><td>동일</td></tr>
+          </table>
+          <div class="fix-box"><strong>2026-05-28</strong> — 운영 적용 예정</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== J-2 ===== -->
+  <div class="case-card" id="new-j2">
+    <div class="case-header" onclick="toggleCase('new-j2-body')">
+      <h3><span class="case-tag tag-resolved">해결</span> J-2: CASE 키워드 누락 / 컬럼 prefix 누락</h3>
+      <span class="case-toggle">+</span>
+    </div>
+    <div class="case-body" id="new-j2-body">
+      <div class="section"><h4>에러 메시지</h4>
+        <div class="error-box">EL10714 - 추출에서 초기화시 오류가 발생하였습니다.
+원인: ERROR: syntax error at or near "WHEN"   또는   syntax error at or near "tb_xxx_c"
+Position: NNN SQLState = 42601</div>
+      </div>
+      <div class="section"><h4>원인</h4>
+        <p>DML 에 <code>[컬럼명] WHEN [조건] THEN ... ELSE ... END AS [컬럼명]</code> 형태로 작성되어 있는데 앞에 <code>CASE</code> 키워드 누락.
+        Oracle → PG 변환 시 자주 발생한 패턴.</p>
+        <p><strong>잘못된 형태 변형들:</strong></p>
+        <ul style="margin-left:20px; font-size:12px;">
+          <li><code>DATA_STD_DE WHEN LENGTH(...) THEN ... END</code></li>
+          <li><code>FRC_DOG_YN WHEN tb_xxx.SPECIES_NM IN (...) THEN 'Y' ELSE 'N' END</code></li>
+        </ul>
+      </div>
+
+      <div class="section"><h4>적용 사례: <code>J_TB_ANIMAL_REG_STUS_C_01</code> (ref=65003)</h4>
+        <div class="warn-box" style="margin-bottom:8px;">⚠️ 이 SQL 은 <strong><code>J_TB_ANIMAL_REG_STUS_C_01</code> 잡 전용</strong>입니다. 다른 잡에 붙여넣지 마세요. (소스: <code>gdpcl.tb_animal_reg_stus_c</code>)</div>
+        <p class="sql-copy-label">수정 후 SQL — 추출 노드의 SQL 수동 입력 칸에 붙여넣기:</p>
+        <div class="sql-copy-block">
+<textarea readonly>SELECT
+  tb_animal_reg_stus_c.SIDO_NM AS SIDO_NM,
+  tb_animal_reg_stus_c.SIGNGU_NM AS SIGNGU_NM,
+  tb_animal_reg_stus_c.BIRTH_YY AS BIRTH_YY,
+  tb_animal_reg_stus_c.RFID_DIV AS RFID_DIV,
+  tb_animal_reg_stus_c.LVSTCKIND_NM AS LVSTCKIND_NM,
+  tb_animal_reg_stus_c.SPECIES_NM AS SPECIES_NM,
+  tb_animal_reg_stus_c.CNT_AMNT AS CNT_AMNT,
+  CASE WHEN tb_animal_reg_stus_c.SPECIES_NM IN ('도사', '도사 믹스견', '핏불테리어', '핏불테리어 믹스견', '아메리칸 핏불 테리어', '아메리칸 핏불 테리어 믹스견', '아메리칸 스태퍼드셔 테리어', '아메리칸 스태퍼드셔 테리어 믹스견', '스태퍼드셔 불 테리어', '스태퍼드셔 불 테리어 믹스견', '로트와일러', '로트와일러 믹스견') THEN 'Y'
+    ELSE 'N' END AS FRC_DOG_YN,
+  tb_animal_reg_stus_c.data_colct_de AS DATA_COLCT_DE,
+  'N' AS APRV_YN,
+  tb_animal_reg_stus_c.ETL_LDADNG_DTM AS ETL_LDADNG_DTM
+FROM
+  gdpcl.tb_animal_reg_stus_c tb_animal_reg_stus_c</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <table class="change-table">
+          <tr><th>#</th><th>변경 전</th><th>변경 후</th><th>이유</th></tr>
+          <tr><td>1</td><td><code>FRC_DOG_YN WHEN</code></td><td><code>CASE WHEN</code></td><td>CASE 키워드 누락 (구문 오류)</td></tr>
+          <tr><td>2</td><td><code>'APRV_YN' AS APRV_YN</code></td><td><code>'N' AS APRV_YN</code></td><td>character(1) 오버플로 (J-1 패턴 병행)</td></tr>
+          <tr><td>3</td><td><code>ETL_LDADNG_DTM AS</code></td><td><code>tb_animal_reg_stus_c.ETL_LDADNG_DTM AS</code></td><td>테이블 prefix 누락 (모호한 참조 방지)</td></tr>
+        </table>
+        <div class="fix-box"><strong>2026-05-28</strong> — 운영 적용 완료 / 성공</div>
+      </div>
+
+      <div class="section"><h4>다른 사례: BTYCRCHRSTN 11개 잡 (이력)</h4>
+        <p>패턴: <code>DATA_STD_DE WHEN LENGTH(...)</code> → <code>CASE WHEN LENGTH(...)</code></p>
+        <div class="fix-box"><strong>2026-05-26</strong> — 11개 잡 일괄 수정 / 성공</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== J-3 ===== -->
+  <div class="case-card" id="new-j3">
+    <div class="case-header" onclick="toggleCase('new-j3-body')">
+      <h3><span class="case-tag tag-resolved">해결</span> J-3: 함수명이 컬럼명으로 치환됨 (TO_CHAR / REPLACE 등)</h3>
+      <span class="case-toggle">+</span>
+    </div>
+    <div class="case-body" id="new-j3-body">
+      <div class="section"><h4>에러 메시지</h4>
+        <div class="error-box">에러 1) ERROR: function data_colct_de(timestamp, unknown) does not exist
+        SQLState = 42883
+
+에러 2) ERROR: invalid input syntax for type numeric: "1명"
+        Where: unnamed portal parameter $N = '...'   SQLState = 22P02</div>
+      </div>
+      <div class="section"><h4>원인</h4>
+        <p>Oracle &rarr; PG 변환 시 SQL 함수명이 같은 이름의 결과 컬럼명으로 잘못 치환됨. 함수 호출이 컬럼 참조가 되어 의미가 깨짐.</p>
+        <p><strong>흔한 패턴:</strong></p>
+        <ul style="margin-left:20px; font-size:12px;">
+          <li><code>TO_CHAR(CURRENT_TIMESTAMP, 'YYYYMMDD')</code> &rarr; <code>DATA_COLCT_DE(CURRENT_TIMESTAMP, 'YYYYMMDD')</code></li>
+          <li><code>REPLACE(TRIM(col), '명', '')</code> &rarr; <code>EMPLMNT_PSNCNT(TRIM(col), '')</code> <span style="color:#d32f2f;">(인자도 함께 소실됨)</span></li>
+        </ul>
+      </div>
+
+      <div class="section"><h4>적용 사례 1: TO_CHAR 함수명 치환 (DATA_COLCT_DE)</h4>
+        <table class="change-table">
+          <tr><th>변경 전</th><th>변경 후</th></tr>
+          <tr><td><code>DATA_COLCT_DE(CURRENT_TIMESTAMP, 'YYYYMMDD')</code></td><td><code>TO_CHAR(CURRENT_TIMESTAMP, 'YYYYMMDD')</code></td></tr>
+        </table>
+        <div class="fix-box"><strong>2026-05-26</strong> &mdash; ref=43972, 45399 / 성공</div>
+      </div>
+
+      <div class="section"><h4>적용 사례 3: <code>J_SW_TB_HGRIV_DISTRCT_RAFAL_OBSVT_C_01</code> (ref=42549) — ROW_NUMBER 치환 + 다중 리터럴 오버플로</h4>
+        <p>여러 패턴이 한 SQL 에 동시에 있는 케이스. Oracle 의 <code>ROWNUM</code> 이 잘못 변환되어 <code>NO()</code> (없는 함수) 가 됨 + 여러 리터럴이 char 컬럼에 오버플로.</p>
+        <div class="error-box">EL10714 - 추출에서 초기화시 오류가 발생하였습니다.
+원인: ERROR: function no() does not exist
+Hint: No function matches the given name and argument types. You might need to add explicit type casts.
+Position: 12 SQLState = 42883</div>
+        <div class="warn-box" style="margin-bottom:8px;">⚠️ 이 SQL 은 <strong><code>J_SW_TB_HGRIV_DISTRCT_RAFAL_OBSVT_C_01</code> 잡 전용</strong>입니다. 다른 잡에 붙여넣지 마세요. (소스: <code>gdpcl.tb_hgriv_distrct_rafal_obsvt_c</code>)</div>
+        <p class="sql-copy-label">수정 후 SQL — 추출 노드의 SQL 수동 입력 칸에 붙여넣기:</p>
+        <div class="sql-copy-block">
+<textarea readonly>SELECT
+  ROW_NUMBER() OVER () AS NO,
+  tb_hgriv_distrct_rafal_obsvt_c.SIGUN_CD AS SIGUN_CD,
+  tb_hgriv_distrct_rafal_obsvt_c.SIGUN_NM AS SIGUN_NM,
+  tb_hgriv_distrct_rafal_obsvt_c.RAFAL_OBSVT_DIV AS RAFAL_OBSVT_DIV,
+  tb_hgriv_distrct_rafal_obsvt_c.RAFAL_OBSVT_NM AS RAFAL_OBSVT_NM,
+  tb_hgriv_distrct_rafal_obsvt_c.JURISD_INST_NM AS JURISD_INST_NM,
+  tb_hgriv_distrct_rafal_obsvt_c.ADDR AS ADDR,
+  tb_hgriv_distrct_rafal_obsvt_c.DETAIL_ADDR AS DETAIL_ADDR,
+  tb_hgriv_distrct_rafal_obsvt_c.LOGT_ITEM_VL AS LOGT_ITEM_VL,
+  tb_hgriv_distrct_rafal_obsvt_c.LAT_ITEM_VL AS LAT_ITEM_VL,
+  tb_hgriv_distrct_rafal_obsvt_c.WGS84_LOGT AS WGS84_LOGT,
+  tb_hgriv_distrct_rafal_obsvt_c.WGS84_LAT AS WGS84_LAT,
+  tb_hgriv_distrct_rafal_obsvt_c.data_colct_de AS DATA_COLCT_DE,
+  'N' AS APRV_YN,
+  tb_hgriv_distrct_rafal_obsvt_c.ETL_LDADNG_DTM AS ETL_LDADNG_DTM,
+  tb_hgriv_distrct_rafal_obsvt_c.REFINE_LOTNO_ADDR AS REFINE_LOTNO_ADDR,
+  tb_hgriv_distrct_rafal_obsvt_c.REFINE_ROADNM_ADDR AS REFINE_ROADNM_ADDR,
+  tb_hgriv_distrct_rafal_obsvt_c.REFINE_ZIPNO AS REFINE_ZIPNO,
+  tb_hgriv_distrct_rafal_obsvt_c.REFINE_WGS84_LOGT AS REFINE_WGS84_LOGT,
+  tb_hgriv_distrct_rafal_obsvt_c.REFINE_WGS84_LAT AS REFINE_WGS84_LAT,
+  tb_hgriv_distrct_rafal_obsvt_c.REFINE_MANAGE_NO AS REFINE_MANAGE_NO,
+  tb_hgriv_distrct_rafal_obsvt_c.REFINE_RESLT_CD AS REFINE_RESLT_CD,
+  tb_hgriv_distrct_rafal_obsvt_c.REFINE_ADDR_DIV_CD AS REFINE_ADDR_DIV_CD,
+  tb_hgriv_distrct_rafal_obsvt_c.REFINE_SYS_DIV_CD AS REFINE_SYS_DIV_CD,
+  tb_hgriv_distrct_rafal_obsvt_c.REFINE_DTM AS REFINE_DTM,
+  'N' AS REFINE_STATE_CD,
+  'N' AS REFINE_NOADMIT_YN
+FROM
+  gdpcl.tb_hgriv_distrct_rafal_obsvt_c tb_hgriv_distrct_rafal_obsvt_c
+WHERE SUBSTR(RAFAL_OBSVT_DIV,1,1) ='1'</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <table class="change-table">
+          <tr><th>#</th><th>변경 전</th><th>변경 후</th><th>이유</th></tr>
+          <tr><td>1</td><td><code>NO() OVER () AS NO</code></td><td><code>ROW_NUMBER() OVER () AS NO</code></td><td>Oracle ROWNUM → PG ROW_NUMBER. <code>NO()</code> 는 존재하지 않는 함수 (컬럼명이 함수명으로 잘못 치환됨)</td></tr>
+          <tr><td>2</td><td><code>'APRV_YN' AS APRV_YN</code></td><td><code>'N' AS APRV_YN</code></td><td>char(1) 오버플로 (J-1 패턴)</td></tr>
+          <tr><td>3</td><td><code>ETL_LDADNG_DTM AS</code></td><td><code>tb_hgriv_distrct_rafal_obsvt_c.ETL_LDADNG_DTM AS</code></td><td>테이블 prefix 누락</td></tr>
+          <tr><td>4</td><td><code>'REFINE_STATE_CD' AS REFINE_STATE_CD</code></td><td><code>'N' AS REFINE_STATE_CD</code></td><td>varchar(2) 에 15자 문자열 못 들어감</td></tr>
+          <tr><td>5</td><td><code>'REFINE_NOADMIT_YN' AS REFINE_NOADMIT_YN</code></td><td><code>'N' AS REFINE_NOADMIT_YN</code></td><td>char(1) 오버플로 (J-1 패턴)</td></tr>
+        </table>
+        <div class="fix-box"><strong>2026-05-28</strong> &mdash; 운영 적용 예정</div>
+      </div>
+
+      <div class="section"><h4>적용 사례 2: <code>J_TB_GG_JOBABA_RECRU_ST_C_01</code> (ref=52369) — REPLACE 치환 + 인자 소실</h4>
+        <p>"1명", "2명" 같은 한글 포함 숫자에서 "명" 제거 후 numeric 변환 필요. 원본 <code>REPLACE(TRIM(col), '명', '')</code> 가 함수명 + 두번째 인자 모두 깨짐.</p>
+        <div class="warn-box" style="margin-bottom:8px;">⚠️ 이 SQL 은 <strong><code>J_TB_GG_JOBABA_RECRU_ST_C_01</code> 잡 전용</strong>입니다. 다른 잡에 붙여넣지 마세요. (소스: <code>gdpcl.tb_gg_jobaba_recru_st_c</code>)</div>
+        <p class="sql-copy-label">수정 후 SQL — 추출 노드의 SQL 수동 입력 칸에 붙여넣기:</p>
+        <div class="sql-copy-block">
+<textarea readonly>SELECT
+  tb_gg_jobaba_recru_st_c.SIGUN_CD AS SIGUN_CD,
+  tb_gg_jobaba_recru_st_c.SIGUN_NM AS SIGUN_NM,
+  tb_gg_jobaba_recru_st_c.ENTRPRS_NM AS ENTRPRS_NM,
+  tb_gg_jobaba_recru_st_c.PBANC_CONT AS PBANC_CONT,
+  tb_gg_jobaba_recru_st_c.SALARY_COND AS SALARY_COND,
+  tb_gg_jobaba_recru_st_c.PBANC_FORM_CD_NM AS PBANC_FORM_CD_NM,
+  tb_gg_jobaba_recru_st_c.PBANC_FORM_DIV AS PBANC_FORM_DIV,
+  tb_gg_jobaba_recru_st_c.WORK_REGION_CD_CONT AS WORK_REGION_CD_CONT,
+  tb_gg_jobaba_recru_st_c.WORK_REGION_CONT AS WORK_REGION_CONT,
+  tb_gg_jobaba_recru_st_c.CAREER_CD_NM AS CAREER_CD_NM,
+  tb_gg_jobaba_recru_st_c.CAREER_DIV AS CAREER_DIV,
+  tb_gg_jobaba_recru_st_c.ACDMCR_CD_NM AS ACDMCR_CD_NM,
+  tb_gg_jobaba_recru_st_c.ACDMCR_DIV AS ACDMCR_DIV,
+  tb_gg_jobaba_recru_st_c.RECRUT_FIELD_CD_NM AS RECRUT_FIELD_CD_NM,
+  tb_gg_jobaba_recru_st_c.RECRUT_FIELD_NM AS RECRUT_FIELD_NM,
+  NULLIF(REPLACE(TRIM(tb_gg_jobaba_recru_st_c.EMPLMNT_PSNCNT), '명', ''), '')::numeric AS EMPLMNT_PSNCNT,
+  tb_gg_jobaba_recru_st_c.RCPT_BGNG_DE AS RCPT_BGNG_DE,
+  tb_gg_jobaba_recru_st_c.RCPT_END_DE AS RCPT_END_DE,
+  tb_gg_jobaba_recru_st_c.URL AS URL,
+  tb_gg_jobaba_recru_st_c.data_colct_de AS DATA_COLCT_DE,
+  'N' AS APRV_YN,
+  tb_gg_jobaba_recru_st_c.ETL_LDADNG_DTM AS ETL_LDADNG_DTM
+FROM
+  gdpcl.tb_gg_jobaba_recru_st_c tb_gg_jobaba_recru_st_c</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <table class="change-table">
+          <tr><th>#</th><th>변경 전</th><th>변경 후</th><th>이유</th></tr>
+          <tr><td>1</td><td><code>EMPLMNT_PSNCNT(TRIM(...), '')</code></td><td><code>NULLIF(REPLACE(TRIM(...), '명', ''), '')</code></td><td>함수명 치환 + 인자 복원 + 빈 문자열 NULL 처리 (numeric 변환 실패 방지)</td></tr>
+          <tr><td>2</td><td><code>'APRV_YN' AS APRV_YN</code></td><td><code>'N' AS APRV_YN</code></td><td>character(1) 오버플로 (J-1 패턴)</td></tr>
+          <tr><td>3</td><td><code>ETL_LDADNG_DTM AS</code></td><td><code>tb_gg_jobaba_recru_st_c.ETL_LDADNG_DTM AS</code></td><td>테이블 prefix 누락</td></tr>
+        </table>
+        <div class="warn-box" style="margin-top:8px;"><strong>추가 패턴: 빈 문자열 → numeric 변환 방지</strong>
+          <br>원본 컬럼이 <code>""</code> (빈 문자열) 이거나 <code>"명"</code> 단독이면 <code>REPLACE</code> 결과가 빈 문자열이 되어 numeric 변환 시 에러 (<code>invalid input syntax for type numeric: ""</code>).
+          <br><code>NULLIF(..., '')</code> 로 빈 문자열을 NULL 로 변환 → numeric 컬럼에 NULL 입력.
+        </div>
+        <div class="fix-box"><strong>2026-05-28</strong> &mdash; 운영 적용 예정 (NULLIF 추가 버전)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== J-4 ===== -->
+  <div class="case-card" id="new-j4">
+    <div class="case-header" onclick="toggleCase('new-j4-body')">
+      <h3><span class="case-tag tag-resolved">해결</span> J-4: 필드가 모델에 존재하지 않음 — di_model 컬럼명 불일치</h3>
+      <span class="case-toggle">+</span>
+    </div>
+    <div class="case-body" id="new-j4-body">
+      <div class="section"><h4>에러 메시지</h4>
+        <div class="error-box">EL10741 - xxx 필드가 모델 상에 존재하지 않습니다.</div>
+      </div>
+      <div class="section"><h4>원인</h4>
+        <p>Oracle → PG 이관 시 타겟 컬럼명 표준화 → BTL 모델에 옛 컬럼명이 남아있어 실제 PG 테이블 컬럼과 불일치.</p>
+      </div>
+      <div class="section"><h4>구분: 두 가지 변형</h4>
+        <table class="change-table">
+          <tr><th>유형</th><th>증상</th><th>해결</th></tr>
+          <tr>
+            <td>4-A. 모델 자체에 옛 컬럼명</td>
+            <td>모델 컬럼 목록에 옛 이름 (예: <code>MESURE_HR</code>) 이 있고 실제 PG 테이블 컬럼명 (예: <code>HR_INFO</code>) 과 다름</td>
+            <td>모델 컬럼명 직접 수정 (4-A 방법)</td>
+          </tr>
+          <tr>
+            <td>4-B. 잡의 타겟 노드에 orphan FieldNode</td>
+            <td>모델은 정상 (예: <code>pbanc_title</code>) 인데 잡의 타겟 노드 하단에 <span style="color:#d32f2f;">빨간색 컬럼들</span> (예: <code>pblanc_title</code>) 이 남아있음</td>
+            <td>타겟 노드 삭제 후 모델 재추가 (4-B 방법)</td>
+          </tr>
+        </table>
+      </div>
+
+      <div class="section"><h4>4-A. 모델 컬럼명 직접 수정 (모델 자체가 옛 이름인 경우)</h4>
+        <div class="step"><div class="step-num">1</div><div class="step-content">PG 실제 컬럼명 먼저 확인 (DB 접속 또는 별도 조회):
+<pre class="sql"><span class="keyword">SELECT</span> column_name <span class="keyword">FROM</span> information_schema.columns
+<span class="keyword">WHERE</span> table_schema = <span class="string">'gdpdo'</span> <span class="keyword">AND</span> table_name = <span class="string">'[테이블]'</span>
+<span class="keyword">ORDER BY</span> ordinal_position;</pre></div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-content">BTL Designer 리포지토리 탐색기 → 모델 폴더에서 해당 모델 찾기</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-content">모델 더블클릭 → 컬럼 목록 표시</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-content">옛 컬럼명 (예: <code>MESURE_HR</code>) 더블클릭 → 속성 수정 → physicalName / logicalName / name 모두 새 이름 (예: <code>HR_INFO</code>) 으로 변경</div></div>
+        <div class="step"><div class="step-num">5</div><div class="step-content">저장 → 잡 재실행</div></div>
+        <div class="warn-box">
+          <strong>중요:</strong> 모델은 같은 컬럼이 두 군데 (form 1: physicalName 형식 / form 2: name 형식) 에 정의되어 있습니다. Designer UI 에서는 양쪽 다 자동 갱신됩니다.
+        </div>
+        <div class="fix-box"><strong>2026-05-26</strong> — <code>tb_aws_1hour_obser</code> 모델 (ref=43970): <code>MESURE_HR</code> → <code>HR_INFO</code> / 성공</div>
+      </div>
+
+      <div class="section"><h4>4-B. 타겟 노드 삭제 후 재추가 (잡의 타겟 노드에 orphan FieldNode 가 있는 경우)</h4>
+        <p>증상: 잡 편집 화면의 오른쪽 끝 타겟 테이블 노드 하단에 <span style="color:#d32f2f;">빨간색 컬럼들</span> (옛 이름 잔재) 이 보임.</p>
+        <div class="step"><div class="step-num">1</div><div class="step-content">잡 편집 화면에서 오른쪽 끝 <strong>타겟 테이블 노드</strong> 클릭하여 선택</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-content"><strong>Delete</strong> 키 또는 우클릭 → 삭제</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-content">좌측 <strong>리포지토리 탐색기</strong>에서 같은 모델 (예: <code>tb_job_fndtn_edu_traing_m</code>) 찾기</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-content">모델을 잡 편집 화면의 오른쪽 영역에 <strong>드래그</strong>해서 추가</div></div>
+        <div class="step"><div class="step-num">5</div><div class="step-content"><strong>변환 노드 출력</strong> ↔ <strong>새 타겟 노드 입력</strong> 자동 연결 확인 (자동 연결 안 되면 화살표 수동으로 그리기 — 변환 노드 우측 끝에서 타겟 노드 좌측으로 드래그)</div></div>
+        <div class="step"><div class="step-num">6</div><div class="step-content">타겟 노드 더블클릭 → <strong>타겟특성 탭</strong> → 동작 방식 확인 (보통 "비우고 넣기 (TRUNCATE)" 또는 "추가하기 (INSERT)")</div></div>
+        <div class="step"><div class="step-num">7</div><div class="step-content"><strong>확인</strong> → 잡 저장 (Ctrl+S)</div></div>
+        <div class="step"><div class="step-num">8</div><div class="step-content">워크플랜 재실행</div></div>
+        <div class="warn-box">
+          <strong>왜 이 방법을 쓰는가:</strong> 잡의 타겟 노드는 이전 모델 (옛 컬럼명) 을 기준으로 만들어진 FieldNode 들을 내부적으로 가지고 있음. 모델이 표준화돼서 컬럼명이 바뀌어도 잡의 FieldNode 는 자동 갱신 안 됨 → 모델 조회 시 옛 이름이 없어서 EL10741 에러. 노드 삭제 후 재추가하면 FieldNode 가 새 모델 기준으로 다시 생성됨.
+        </div>
+        <div class="fix-box"><strong>2026-05-28</strong> — <code>J_TB_JOB_FNDTN_EDU_TRAING_C_01</code>: orphan FieldNodes (<code>pblanc_title</code>, <code>recrut_begin_de</code>, <code>recrut_end_de</code>, <code>data_colct_de</code>, <code>etl_ldadng_dtm</code>) — 타겟 노드 삭제 후 재추가 / 성공</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== S-1 ===== -->
+  <div class="category-title">SQL 실행 / 접속 에러</div>
+  <div class="case-card" id="new-s1">
+    <div class="case-header" onclick="toggleCase('new-s1-body')">
+      <h3><span class="case-tag tag-resolved">해결</span> S-1: "xxx is a procedure" — FUNCTION/PROCEDURE 충돌 (DB routine 수정 필요)</h3>
+      <span class="case-toggle">+</span>
+    </div>
+    <div class="case-body" id="new-s1-body">
+      <div class="warn-box">
+        <strong>예외 케이스:</strong> 이 에러는 DB 의 routine (FUNCTION/PROCEDURE) 정의 자체를 바꿔야 하므로 BTL Designer 로 처리 불가능. <strong>예외적으로 SQL 직접 처리</strong>가 유일한 방법.
+      </div>
+
+      <div class="section"><h4>에러 메시지</h4>
+        <div class="error-box">EL00661 - xxx 실행시 SQLException이 발생하였습니다.
+원인: ERROR: [스키마].[이름]() is a procedure
+Hint: To call a procedure, use CALL.
+Position: NN SQLState = 42809</div>
+      </div>
+      <div class="section"><h4>원인</h4>
+        <p>BTL 패치된 di_server.jar 는 SP 호출 시 <code>{? = call name(?)}</code> (FUNCTION 호출 방식) 을 사용. PG 에서 같은 이름이 <strong>PROCEDURE</strong> 로 정의되어 있으면 호출 실패.</p>
+        <p>운영 서버에 dev 의 FUNCTION 정의를 적용했어야 하는데, 충돌 회피로 미적용한 routine 들이 이 에러를 일으킴.</p>
+      </div>
+
+      <div class="section"><h4>진단</h4>
+        <pre class="sql"><span class="comment">-- 같은 이름의 routine 종류 확인</span>
+<span class="keyword">SELECT</span> p.proname,
+       <span class="keyword">CASE</span> p.prokind <span class="keyword">WHEN</span> <span class="string">'f'</span> <span class="keyword">THEN</span> <span class="string">'FUNCTION'</span> <span class="keyword">WHEN</span> <span class="string">'p'</span> <span class="keyword">THEN</span> <span class="string">'PROCEDURE'</span> <span class="keyword">END</span> <span class="keyword">AS</span> kind,
+       pg_get_function_identity_arguments(p.oid) <span class="keyword">AS</span> args
+<span class="keyword">FROM</span> pg_proc p
+<span class="keyword">JOIN</span> pg_namespace n <span class="keyword">ON</span> n.oid = p.pronamespace
+<span class="keyword">WHERE</span> n.nspname = <span class="string">'[스키마]'</span> <span class="keyword">AND</span> p.proname = <span class="string">'[함수명]'</span>;</pre>
+        <p>PROCEDURE 만 나오면 충돌 원인 확정. FUNCTION 으로 재정의 필요.</p>
+      </div>
+
+      <div class="section"><h4>적용 사례: <code>gdpslptl.sp_saeol_merge_all</code></h4>
+        <div class="warn-box" style="margin-bottom:8px;">⚠️ 이 SQL 은 <strong><code>gdpslptl.sp_saeol_merge_all</code> 전용</strong>입니다. 다른 routine 에 적용하지 마세요.</div>
+        <p class="sql-copy-label">prod 적용 SQL — 운영 DB 에서 실행 (백업 → DROP → CREATE):</p>
+        <div class="sql-copy-block">
+<textarea readonly>-- 1. 기존 정의 백업 (롤백 대비, 결과를 텍스트 파일로 저장 권장)
+SELECT pg_get_functiondef(p.oid) AS old_definition
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'gdpslptl' AND p.proname = 'sp_saeol_merge_all';
+
+-- 2. 기존 PROCEDURE 삭제
+DROP PROCEDURE IF EXISTS gdpslptl.sp_saeol_merge_all();
+
+-- 3. FUNCTION 으로 재생성 (dev 의 정의)
+CREATE OR REPLACE FUNCTION gdpslptl.sp_saeol_merge_all()
+ RETURNS void
+ LANGUAGE plpgsql
+AS $function$
+DECLARE
+    r RECORD;
+BEGIN
+    FOR r IN
+        SELECT open_servc_idntfy_no, tgt_table_name
+        FROM gdpslptl.tb_saeol_group
+        WHERE 1=1
+          AND open_servc_idntfy_no <> '09_28_02_P'
+        GROUP BY open_servc_idntfy_no, tgt_table_name
+        ORDER BY 1
+    LOOP
+        PERFORM gdpslptl.sp_saeol_merge2(r.open_servc_idntfy_no);
+    END LOOP;
+END;
+$function$;
+
+-- 4. 검증: FUNCTION 으로 등록됐는지 확인
+SELECT p.proname,
+       CASE p.prokind WHEN 'f' THEN 'FUNCTION' WHEN 'p' THEN 'PROCEDURE' END AS kind
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'gdpslptl' AND p.proname = 'sp_saeol_merge_all';
+-- 결과: FUNCTION 으로 나와야 함</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <div class="warn-box">
+          <strong>의존성 선행 확인:</strong> 이 FUNCTION 은 내부적으로 <code>gdpslptl.sp_saeol_merge2(text)</code> 를 호출합니다.
+          운영에 <code>sp_saeol_merge2</code> 가 FUNCTION 으로 있는지 먼저 확인하세요. 없거나 PROCEDURE 면 그것도 먼저 FUNCTION 으로 만들어야 합니다.
+          <pre class="sql" style="margin-top:6px;"><span class="keyword">SELECT</span> p.proname, p.prokind, pg_get_function_identity_arguments(p.oid)
+<span class="keyword">FROM</span> pg_proc p <span class="keyword">JOIN</span> pg_namespace n <span class="keyword">ON</span> n.oid = p.pronamespace
+<span class="keyword">WHERE</span> n.nspname = <span class="string">'gdpslptl'</span> <span class="keyword">AND</span> p.proname = <span class="string">'sp_saeol_merge2'</span>;</pre>
+        </div>
+        <div class="fix-box"><strong>2026-05-28</strong> &mdash; 운영 적용 예정</div>
+      </div>
+
+      <div class="section"><h4>같은 패턴 의심 routine (미적용 3개)</h4>
+        <p>2026-05-27 1차 적용 시 충돌로 미적용된 routine 들. 같은 에러가 나면 동일 방식으로 처리:</p>
+        <ul style="margin-left:20px; font-size:13px;">
+          <li><code>gdpslptl.sp_colct_stat_init(text, text)</code></li>
+          <li><code>gdpslptl.sp_saeol_merge_all()</code> ← 이번 케이스</li>
+          <li><code>gdpslptl.sp_upload_save_cd_chck(text)</code></li>
+        </ul>
+      </div>
+
+      <div class="section"><h4>이전 사례 (collect_cnt)</h4>
+        <div class="fix-box"><strong>2026-05-27</strong> &mdash; <code>gdpcl.collect_cnt(varchar, OUT int)</code> PROCEDURE 삭제 → FUNCTION(text) 만 남김 / 성공</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== S-2 ===== -->
+  <div class="case-card" id="new-s2">
+    <div class="case-header" onclick="toggleCase('new-s2-body')">
+      <h3><span class="case-tag tag-resolved">해결</span> S-2: role "postgres" does not exist — 접속 계정 불일치</h3>
+      <span class="case-toggle">+</span>
+    </div>
+    <div class="case-body" id="new-s2-body">
+      <div class="section"><h4>에러 메시지</h4>
+        <div class="error-box">EL00631 - SQL실행_N 실행시 SQLException이 발생하였습니다.
+원인: FATAL: role "postgres" does not exist   SQLState = 42704</div>
+      </div>
+      <div class="section"><h4>원인</h4>
+        <p>워크플랜의 SQL 실행 노드가 사용하는 connection (예: <code>A_ORACLE_PTL</code>) 이 dev 환경의 <code>postgres@127.0.0.1:5433/orcl_mig</code> 를 가리키고 있음. 운영 환경에는 해당 role/DB 없음.</p>
+      </div>
+      <div class="section"><h4>BTL Designer 수정 방법</h4>
+        <div class="step"><div class="step-num">1</div><div class="step-content">리포지토리 탐색기 → 경기도청 → 모델 → TEST → ORACLE → <code>A_ORACLE_PTL</code> 더블클릭</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-content">"데이터베이스 연결 속성" 다이얼로그 열림</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-content"><strong>"DB 접속정보"</strong> 탭 클릭</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-content">다음 값으로 수정:
+          <table class="change-table">
+            <tr><th>필드</th><th>변경 전 (dev)</th><th>변경 후 (운영)</th></tr>
+            <tr><td>유저아이디</td><td><code>postgres</code></td><td><code>btluser</code></td></tr>
+            <tr><td>패스워드</td><td><code>postgres</code></td><td><code>btl123!</code></td></tr>
+            <tr><td>Host</td><td><code>127.0.0.1</code></td><td><code>172.17.11.206</code></td></tr>
+            <tr><td>Port</td><td><code>5433</code></td><td><code>5444</code></td></tr>
+            <tr><td>DatabaseName</td><td><code>orcl_mig</code></td><td><code>dbpgdp</code></td></tr>
+          </table>
+        </div></div>
+        <div class="step"><div class="step-num">5</div><div class="step-content"><strong>"DB 접속 테스트"</strong> 버튼 클릭 → "접속 성공" 확인</div></div>
+        <div class="step"><div class="step-num">6</div><div class="step-content"><strong>"확인"</strong> 버튼 → 저장</div></div>
+        <div class="step"><div class="step-num">7</div><div class="step-content">워크플랜 재실행 → SQL 실행 노드 통과 확인</div></div>
+      </div>
+      <div class="section"><h4>적용 사례</h4>
+        <div class="fix-box"><strong>2026-05-28</strong> — <code>A_ORACLE_PTL</code> connection (ref=44572) 운영 환경으로 변경 / 성공</div>
+      </div>
+      <div class="warn-box">
+        다른 connection 도 비슷한 패턴 (<code>KLDI</code>, <code>TEST(ORACLE)</code> 등) 이 있을 수 있음 — 워크플랜 실행 시 동일 에러 발생하면 같은 방법으로 수정.
+      </div>
+    </div>
+  </div>
+
+  <!-- 공통 주의 -->
+  <div class="summary-box">
+    <h2>신규 방식 공통 주의사항</h2>
+    <table>
+      <tr><th style="width:30%">항목</th><th>설명</th></tr>
+      <tr><td>변경 이력</td><td>BTL Designer 에서 수정하면 자동으로 revision 증가 + 수정자/일시 기록됨 (운영 추적성 확보)</td></tr>
+      <tr><td>저장 후 적용</td><td>대부분 즉시 반영. BTL 서버 재시작 일반적으로 불필요.</td></tr>
+      <tr><td>접속 정보 변경</td><td>connection 변경 후에는 BTL 클라이언트 재접속 권장 (캐시 갱신)</td></tr>
+      <tr><td>실수 시 복구</td><td>BTL Designer 는 revision 이력을 유지 — 직전 revision 로 되돌리기 가능 (리포지토리 우클릭 → 이력)</td></tr>
+    </table>
+  </div>
+
+</div>
+
+</div>
+
+<div class="footer">BTL DI 4 운영 조치 가이드 | DI3_License 프로젝트</div>
+</body>
+</html>
