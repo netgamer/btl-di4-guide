@@ -466,6 +466,80 @@ FROM
           </div>
           <div class="fix-box"><strong>2026-05-28</strong> — 운영 적용 예정</div>
         </div>
+
+        <div class="section"><h4>적용 사례 3: <code>J_SW_TB_EARTHQUK_SNAMI_SHELTER_M_01</code> (ref=43877) — DATA_STD_DE 변환 + 5건 동시</h4>
+          <p>지진해일 대피소 잡 — 5가지 패턴 (DATA_STD_DE varchar(8) 오버플로 + APRV_YN/REFINE_STATE_CD/REFINE_NOADMIT_YN 리터럴 + ETL prefix).</p>
+          <div class="warn-box" style="margin-bottom:8px;">⚠️ 이 SQL 은 <strong><code>J_SW_TB_EARTHQUK_SNAMI_SHELTER_M_01</code> 잡 전용</strong>입니다. (소스: <code>gdpcl.tb_earthquk_snami_shelter_c</code>)</div>
+          <p class="sql-copy-label">수정 후 SQL — 추출 노드의 SQL 수동 입력 칸에 붙여넣기:</p>
+          <div class="sql-copy-block">
+<textarea readonly>SELECT
+  tb_earthquk_snami_shelter_c.SIGUN_CD AS SIGUN_CD,
+  tb_earthquk_snami_shelter_c.SIGUN_NM AS SIGUN_NM,
+  tb_earthquk_snami_shelter_c.EATQSNM_SHELTER_NM AS EATQSNM_SHELTER_NM,
+  tb_earthquk_snami_shelter_c.EATQSNM_SHELTER_DIV_NM AS EATQSNM_SHELTER_DIV_NM,
+  tb_earthquk_snami_shelter_c.EATQSNM_SHELTER_TYPE AS EATQSNM_SHELTER_TYPE,
+  tb_earthquk_snami_shelter_c.EATQSNM_SHELTER_TYPE_DIV_NM AS EATQSNM_SHELTER_TYPE_DIV_NM,
+  tb_earthquk_snami_shelter_c.LOCPLC_ROADNM_ADDR AS LOCPLC_ROADNM_ADDR,
+  tb_earthquk_snami_shelter_c.LOCPLC_LOTNO_ADDR AS LOCPLC_LOTNO_ADDR,
+  tb_earthquk_snami_shelter_c.LAT AS LAT,
+  tb_earthquk_snami_shelter_c.LOGT AS LOGT,
+  tb_earthquk_snami_shelter_c.ACEPTNC_POSBL_AR AS ACEPTNC_POSBL_AR,
+  tb_earthquk_snami_shelter_c.MAX_ACEPTNC_PSNCNT AS MAX_ACEPTNC_PSNCNT,
+  tb_earthquk_snami_shelter_c.EATQSNM_SHELTER_OPERT_STATE_YN AS EATQSNM_SHELTER_OPERT_STATE_YN,
+  tb_earthquk_snami_shelter_c.EATQSNM_SHELTER_TELNO AS EATQSNM_SHELTER_TELNO,
+  tb_earthquk_snami_shelter_c.SUB_CONVNCE_FACLT_INFO AS SUB_CONVNCE_FACLT_INFO,
+  tb_earthquk_snami_shelter_c.RESEVC_DISTRICT_NM AS RESEVC_DISTRICT_NM,
+  tb_earthquk_snami_shelter_c.RESEVC_DISTRICT_ISE_HSHLD_NOC AS RESEVC_DISTRICT_ISE_HSHLD_NOC,
+  tb_earthquk_snami_shelter_c.RESEVC_DISTRICT_ISE_RESPSN_CNT AS RESEVC_DISTRICT_ISE_RESPSN_CNT,
+  tb_earthquk_snami_shelter_c.RESEVC_DISTRICT_ISE_DSWPSN_CNT AS RESEVC_DISTRICT_ISE_DSWPSN_CNT,
+  tb_earthquk_snami_shelter_c.QUKPRF_APPLCTN_YN_DIV_NM AS QUKPRF_APPLCTN_YN_DIV_NM,
+  tb_earthquk_snami_shelter_c.QUKPRF_DESIGN_RATG AS QUKPRF_DESIGN_RATG,
+  tb_earthquk_snami_shelter_c.SHORLN_DIST_DSTN AS SHORLN_DIST_DSTN,
+  tb_earthquk_snami_shelter_c.ALIT_HG AS ALIT_HG,
+  tb_earthquk_snami_shelter_c.EARTHQUK_EVACTN_GDSPT_CNT AS EARTHQUK_EVACTN_GDSPT_CNT,
+  tb_earthquk_snami_shelter_c.EMRGNCY_EVACTN_PLC_GDSPT_CNT AS EMRGNCY_EVACTN_PLC_GDSPT_CNT,
+  tb_earthquk_snami_shelter_c.EARTHQUK_EVCTLD_GDSPT_CNT AS EARTHQUK_EVCTLD_GDSPT_CNT,
+  tb_earthquk_snami_shelter_c.MNGINST_NM AS MNGINST_NM,
+  tb_earthquk_snami_shelter_c.MNGINST_TELNO AS MNGINST_TELNO,
+  REPLACE(tb_earthquk_snami_shelter_c.data_std_de, '-', '') AS DATA_STD_DE,
+  tb_earthquk_snami_shelter_c.WGS84_LOGT AS WGS84_LOGT,
+  tb_earthquk_snami_shelter_c.WGS84_LAT AS WGS84_LAT,
+  tb_earthquk_snami_shelter_c.data_colct_de AS DATA_COLCT_DE,
+  'N' AS APRV_YN,
+  tb_earthquk_snami_shelter_c.ETL_LDADNG_DTM AS ETL_LDADNG_DTM,
+  tb_earthquk_snami_shelter_c.REFINE_LOTNO_ADDR AS REFINE_LOTNO_ADDR,
+  tb_earthquk_snami_shelter_c.REFINE_ROADNM_ADDR AS REFINE_ROADNM_ADDR,
+  tb_earthquk_snami_shelter_c.REFINE_ZIPNO AS REFINE_ZIPNO,
+  tb_earthquk_snami_shelter_c.REFINE_WGS84_LOGT AS REFINE_WGS84_LOGT,
+  tb_earthquk_snami_shelter_c.REFINE_WGS84_LAT AS REFINE_WGS84_LAT,
+  tb_earthquk_snami_shelter_c.REFINE_MANAGE_NO AS REFINE_MANAGE_NO,
+  tb_earthquk_snami_shelter_c.REFINE_RESLT_CD AS REFINE_RESLT_CD,
+  tb_earthquk_snami_shelter_c.REFINE_ADDR_DIV_CD AS REFINE_ADDR_DIV_CD,
+  tb_earthquk_snami_shelter_c.REFINE_SYS_DIV_CD AS REFINE_SYS_DIV_CD,
+  tb_earthquk_snami_shelter_c.REFINE_DTM AS REFINE_DTM,
+  'N' AS REFINE_STATE_CD,
+  'N' AS REFINE_NOADMIT_YN
+FROM
+  gdpcl.tb_earthquk_snami_shelter_c tb_earthquk_snami_shelter_c
+WHERE SIGUN_CD IN (
+  SELECT DISTINCT(B.TYPE_CD)
+     FROM gdpslptl.tb_upload_sche A , gdpslptl.tb_comm_org B , gdpslptl.tb_open_inf C
+     WHERE A.ORG_CD = B.ORG_CD
+        AND A.INF_ID = C.INF_ID
+        AND C.DS_ID = 'tb_earthquk_snami_shelter_m'
+)</textarea>
+            <button class="copy-btn" onclick="copySql(this)">복사</button>
+          </div>
+          <table class="change-table">
+            <tr><th>#</th><th>변경 전</th><th>변경 후</th></tr>
+            <tr><td>1</td><td><code>data_std_de AS DATA_STD_DE</code></td><td><code>REPLACE(data_std_de, '-', '') AS DATA_STD_DE</code></td></tr>
+            <tr><td>2</td><td><code>'APRV_YN' AS APRV_YN</code></td><td><code>'N' AS APRV_YN</code></td></tr>
+            <tr><td>3</td><td><code>ETL_LDADNG_DTM AS</code></td><td><code>tb_earthquk_snami_shelter_c.ETL_LDADNG_DTM AS</code></td></tr>
+            <tr><td>4</td><td><code>'REFINE_STATE_CD' AS REFINE_STATE_CD</code></td><td><code>'N' AS REFINE_STATE_CD</code></td></tr>
+            <tr><td>5</td><td><code>'REFINE_NOADMIT_YN' AS REFINE_NOADMIT_YN</code></td><td><code>'N' AS REFINE_NOADMIT_YN</code></td></tr>
+          </table>
+          <div class="fix-box"><strong>2026-05-28</strong> — 운영 적용 예정</div>
+        </div>
       </div>
     </div>
   </div>
