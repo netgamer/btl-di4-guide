@@ -1354,6 +1354,103 @@ END $$;</textarea>
 
         <div class="fix-box"><strong>2026-05-28</strong> &mdash; <code>gdpslptl.sp_upload_save_cd_chck</code>: 본문의 <code>EXECUTE IMMEDIATE</code> → <code>EXECUTE</code> 최소 교체 / 적용 예정</div>
       </div>
+
+      <div class="section"><h4>적용 사례 6: <code>gdpslptl.sp_stat_refine</code> — 대소문자 & 컬럼명 혼재 처리</h4>
+        <p>FUNCTION 변환 후 동적 SQL 실행 시 두 가지 에러 발생:
+          <br>① <code>relation "gdpdo.TB_KIDSCAFE_M" does not exist</code> (대문자 quoted)
+          <br>② <code>column "refine_zip_cd" does not exist</code> (컬럼명 혼재 — 일부 테이블에 없음)
+        </p>
+        <div class="warn-box" style="background:#ffebee; border-left:4px solid #c62828;">
+          <strong>운영 환경 컬럼 분포:</strong>
+          <ul style="margin-left:20px;">
+            <li><code>refine_zipno</code>: 약 2,924개 테이블 (대부분)</li>
+            <li><code>refine_zip_cd</code>: 약 295개 테이블 (일부)</li>
+          </ul>
+          → 단순 교체로는 한쪽이 실패. <strong>각 테이블별로 동적 확인</strong> 필요.
+        </div>
+
+        <h5 style="margin-top:14px;">수정 1 — 대소문자 처리 (quote_ident 에 lower() 추가)</h5>
+        <p>찾기:</p>
+        <div class="sql-copy-block">
+<textarea readonly>|| 'FROM ' || quote_ident(r_cur.owner_cd) || '.' || quote_ident(r_cur.ds_id);</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <p>바꾸기:</p>
+        <div class="sql-copy-block">
+<textarea readonly>|| 'FROM ' || quote_ident(lower(r_cur.owner_cd)) || '.' || quote_ident(lower(r_cur.ds_id));</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+
+        <h5 style="margin-top:14px;">수정 2 — DECLARE 섹션에 <code>v_zip_col</code> 변수 추가</h5>
+        <p>찾기:</p>
+        <div class="sql-copy-block">
+<textarea readonly>var_col_cnt INTEGER;        -- 컬럼 존재 확인용</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <p>바로 다음 줄에 추가:</p>
+        <div class="sql-copy-block">
+<textarea readonly>    v_zip_col   TEXT;           -- refine_zip 컬럼명 (refine_zip_cd or refine_zipno)</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+
+        <h5 style="margin-top:14px;">수정 3 — sigun_cd 체크 다음에 v_zip_col 결정 코드 추가</h5>
+        <p>찾기 (sigun_cd 체크 부분):</p>
+        <div class="sql-copy-block">
+<textarea readonly>        SELECT count(*) INTO var_col_cnt
+        FROM information_schema.columns
+        WHERE table_schema = lower(r_cur.owner_cd)
+            AND table_name = lower(r_cur.ds_id)
+            AND column_name = 'sigun_cd';</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <p>바로 다음에 추가 (한 줄 띄우고):</p>
+        <div class="sql-copy-block">
+<textarea readonly>        -- refine_zip 컬럼명 결정 (refine_zip_cd or refine_zipno)
+        SELECT
+            CASE
+                WHEN MAX(CASE WHEN column_name = 'refine_zip_cd' THEN 1 END) = 1 THEN 'refine_zip_cd'
+                WHEN MAX(CASE WHEN column_name = 'refine_zipno' THEN 1 END) = 1 THEN 'refine_zipno'
+                ELSE NULL
+            END INTO v_zip_col
+        FROM information_schema.columns
+        WHERE table_schema = lower(r_cur.owner_cd)
+          AND table_name = lower(r_cur.ds_id)
+          AND column_name IN ('refine_zip_cd', 'refine_zipno');</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+
+        <h5 style="margin-top:14px;">수정 4 — 동적 SQL 의 <code>refine_zip_cd</code> 참조를 <code>v_zip_col</code> 사용으로 변경</h5>
+        <p>찾기 (1줄):</p>
+        <div class="sql-copy-block">
+<textarea readonly>|| 'COALESCE(SUM(CASE WHEN (refine_zip_cd IS NOT NULL AND length(refine_zip_cd) = 5) THEN 1 ELSE 0 END), 0), '</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <p>바꾸기:</p>
+        <div class="sql-copy-block">
+<textarea readonly>|| 'COALESCE(SUM(CASE WHEN (' || COALESCE(v_zip_col, 'NULL') || ' IS NOT NULL AND length(' || COALESCE(v_zip_col, 'NULL') || ') = 5) THEN 1 ELSE 0 END), 0), '</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+
+        <table class="change-table">
+          <tr><th>수정 #</th><th>변경 위치</th><th>요약</th></tr>
+          <tr><td>1</td><td>quote_ident 호출 (line 94 부근)</td><td>대문자 ds_id → lower() 처리</td></tr>
+          <tr><td>2</td><td>DECLARE 섹션</td><td><code>v_zip_col TEXT;</code> 추가</td></tr>
+          <tr><td>3</td><td>LOOP 안 (sigun_cd 체크 뒤)</td><td>refine_zip 컬럼명 동적 결정 코드 추가</td></tr>
+          <tr><td>4</td><td>동적 SQL (line 85 부근)</td><td>refine_zip_cd 하드코딩 → v_zip_col 변수 사용</td></tr>
+        </table>
+
+        <div class="warn-box">
+          <strong>편집 방법:</strong>
+          <ol style="margin-left:20px;">
+            <li>STEP 1 (현재 정의 SELECT) 로 함수 정의를 텍스트 에디터에 가져오기</li>
+            <li>위 4가지 변경을 차례로 찾기/바꾸기</li>
+            <li>수정된 전체 함수 정의를 운영 DB 에 통째로 실행 (CREATE OR REPLACE FUNCTION 가 이미 들어있음)</li>
+            <li>STEP 4 검증 SQL 로 변경 반영 확인</li>
+          </ol>
+        </div>
+
+        <div class="fix-box"><strong>2026-05-28</strong> &mdash; <code>gdpslptl.sp_stat_refine</code>: 대소문자 + 컬럼명 혼재 (refine_zip_cd vs refine_zipno) 동적 처리 / 적용 예정</div>
+      </div>
     </div>
   </div>
 
