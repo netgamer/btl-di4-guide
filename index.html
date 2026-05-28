@@ -1371,15 +1371,16 @@ END $$;</textarea>
       </div>
 
       <div class="section"><h4>적용 사례 6: <code>gdpslptl.sp_stat_refine</code> — 대소문자 & 컬럼명 혼재 처리</h4>
-        <p>FUNCTION 변환 후 동적 SQL 실행 시 두 가지 에러 발생:
+        <p>FUNCTION 변환 후 동적 SQL 실행 시 세 가지 에러 발생:
           <br>① <code>relation "gdpdo.TB_KIDSCAFE_M" does not exist</code> (대문자 quoted)
-          <br>② <code>column "refine_zip_cd" does not exist</code> (컬럼명 혼재 — 일부 테이블에 없음)
+          <br>② <code>column "refine_zip_cd" does not exist</code> (refine_zip_cd vs refine_zipno 혼재)
+          <br>③ <code>column "refine_dtm" does not exist</code> (refine_dt vs refine_dtm vs refine_dttm 혼재)
         </p>
         <div class="warn-box" style="background:#ffebee; border-left:4px solid #c62828;">
           <strong>운영 환경 컬럼 분포:</strong>
           <ul style="margin-left:20px;">
-            <li><code>refine_zipno</code>: 약 2,924개 테이블 (대부분)</li>
-            <li><code>refine_zip_cd</code>: 약 295개 테이블 (일부)</li>
+            <li><code>refine_zip_cd</code> (295개) vs <code>refine_zipno</code> (2,924개)</li>
+            <li><code>refine_dt</code> (2,148개) vs <code>refine_dtm</code> (1,051개) vs <code>refine_dttm</code> (2개)</li>
           </ul>
           → 단순 교체로는 한쪽이 실패. <strong>각 테이블별로 동적 확인</strong> 필요.
         </div>
@@ -1491,6 +1492,7 @@ END $$;</textarea>
     var_sql <span class="keyword">TEXT</span>;               <span class="comment">-- 동적 쿼리</span>
     var_col_cnt <span class="keyword">INTEGER</span>;        <span class="comment">-- 컬럼 존재 확인용</span>
 <span class="added-line">    v_zip_col   <span class="keyword">TEXT</span>;           <span class="comment">-- 🟢 [수정 2] refine_zip 컬럼명 (refine_zip_cd or refine_zipno)</span></span>
+<span class="added-line">    v_dt_col    <span class="keyword">TEXT</span>;           <span class="comment">-- 🟢 [수정 5] refine_dt 컬럼명 (refine_dt or refine_dtm or refine_dttm)</span></span>
 
     <span class="comment">-- 주소정제 대상 데이터셋 목록 커서</span>
     c_cur <span class="keyword">CURSOR FOR</span>
@@ -1551,6 +1553,19 @@ END $$;</textarea>
 <span class="added-line">          <span class="keyword">AND</span> table_name = lower(r_cur.ds_id)</span>
 <span class="added-line">          <span class="keyword">AND</span> column_name <span class="keyword">IN</span> (<span class="string">'refine_zip_cd'</span>, <span class="string">'refine_zipno'</span>);</span>
 
+<span class="added-line">        <span class="comment">-- 🟢 [수정 6] refine_dt 컬럼명 결정 (refine_dt or refine_dtm or refine_dttm)</span></span>
+<span class="added-line">        <span class="keyword">SELECT</span></span>
+<span class="added-line">            <span class="keyword">CASE</span></span>
+<span class="added-line">                <span class="keyword">WHEN</span> MAX(<span class="keyword">CASE WHEN</span> column_name = <span class="string">'refine_dt'</span> <span class="keyword">THEN</span> 1 <span class="keyword">END</span>) = 1 <span class="keyword">THEN</span> <span class="string">'refine_dt'</span></span>
+<span class="added-line">                <span class="keyword">WHEN</span> MAX(<span class="keyword">CASE WHEN</span> column_name = <span class="string">'refine_dtm'</span> <span class="keyword">THEN</span> 1 <span class="keyword">END</span>) = 1 <span class="keyword">THEN</span> <span class="string">'refine_dtm'</span></span>
+<span class="added-line">                <span class="keyword">WHEN</span> MAX(<span class="keyword">CASE WHEN</span> column_name = <span class="string">'refine_dttm'</span> <span class="keyword">THEN</span> 1 <span class="keyword">END</span>) = 1 <span class="keyword">THEN</span> <span class="string">'refine_dttm'</span></span>
+<span class="added-line">                <span class="keyword">ELSE NULL</span></span>
+<span class="added-line">            <span class="keyword">END INTO</span> v_dt_col</span>
+<span class="added-line">        <span class="keyword">FROM</span> information_schema.columns</span>
+<span class="added-line">        <span class="keyword">WHERE</span> table_schema = lower(r_cur.owner_cd)</span>
+<span class="added-line">          <span class="keyword">AND</span> table_name = lower(r_cur.ds_id)</span>
+<span class="added-line">          <span class="keyword">AND</span> column_name <span class="keyword">IN</span> (<span class="string">'refine_dt'</span>, <span class="string">'refine_dtm'</span>, <span class="string">'refine_dttm'</span>);</span>
+
         v_source := r_cur.ds_id;
 
         <span class="comment">-- 동적 쿼리 생성 (표준 CASE/COALESCE 사용)</span>
@@ -1565,11 +1580,11 @@ END $$;</textarea>
                 || <span class="string">'COALESCE(SUM(CASE WHEN refine_reslt_cd NOT IN (''H'', ''I'', ''G'', ''6'', ''8'', ''E'') THEN 1 ELSE 0 END), 0), '</span>
                 || <span class="string">'COALESCE(SUM(CASE WHEN refine_state_cd NOT IN (''S'', ''F'') THEN 1 ELSE 0 END), 0), '</span>
                 || <span class="string">'CASE WHEN COALESCE(SUM(CASE WHEN refine_state_cd NOT IN (''S'', ''F'') THEN 1 ELSE 0 END), 0) > 0 THEN -1 '</span>
-                || <span class="string">'     ELSE COALESCE(EXTRACT(EPOCH FROM (MAX(refine_dtm) - MIN(refine_dtm))), -1) END, '</span>
+<span class="modified-line">                || <span class="string">'     ELSE COALESCE(EXTRACT(EPOCH FROM (MAX('</span> || <span class="modified">COALESCE(v_dt_col, <span class="string">'NULL::timestamp'</span>)</span> || <span class="string">') - MIN('</span> || <span class="modified">COALESCE(v_dt_col, <span class="string">'NULL::timestamp'</span>)</span> || <span class="string">'))), -1) END, '</span>   <span class="comment">-- 🟡 [수정 7-1]</span></span>
                 || <span class="string">'0.0, '</span>
                 || <span class="string">'COALESCE(SUM(CASE WHEN refine_state_cd = ''S'' THEN 1 ELSE 0 END), 0), '</span>
                 || <span class="string">'COALESCE(SUM(CASE WHEN refine_state_cd = ''F'' THEN 1 ELSE 0 END), 0), '</span>
-                || <span class="string">'0.0, MAX(refine_dtm), CURRENT_TIMESTAMP '</span>
+<span class="modified-line">                || <span class="string">'0.0, MAX('</span> || <span class="modified">COALESCE(v_dt_col, <span class="string">'NULL::timestamp'</span>)</span> || <span class="string">'), CURRENT_TIMESTAMP '</span>   <span class="comment">-- 🟡 [수정 7-2]</span></span>
 <span class="modified-line">                || <span class="string">'FROM '</span> || quote_ident(<span class="modified">lower(r_cur.owner_cd)</span>) || <span class="string">'.'</span> || quote_ident(<span class="modified">lower(r_cur.ds_id)</span>);   <span class="comment">-- 🟡 [수정 1]</span></span>
 
         <span class="keyword">IF</span> var_col_cnt > 0 <span class="keyword">THEN</span>
@@ -1615,14 +1630,17 @@ END $$;</textarea>
 $function$;</div>
 
         <p style="font-size:12px; color:#666; margin-top:8px;">
-          <strong>변경 위치 4곳:</strong>
+          <strong>변경 위치 7곳:</strong>
+          <br>🟡 <strong>[수정 1]</strong> FROM 절의 <code>quote_ident(r_cur.xxx)</code> → <code>quote_ident(lower(r_cur.xxx))</code>
           <br>🟢 <strong>[수정 2]</strong> DECLARE 섹션에 <code>v_zip_col TEXT;</code> 한 줄 추가
           <br>🟢 <strong>[수정 3]</strong> sigun_cd 체크 다음에 v_zip_col 결정 코드 10줄 추가
           <br>🟡 <strong>[수정 4]</strong> 동적 SQL 의 <code>refine_zip_cd</code> 하드코딩 → <code>v_zip_col</code> 변수 사용
-          <br>🟡 <strong>[수정 1]</strong> FROM 절의 <code>quote_ident(r_cur.xxx)</code> → <code>quote_ident(lower(r_cur.xxx))</code>
+          <br>🟢 <strong>[수정 5]</strong> DECLARE 섹션에 <code>v_dt_col TEXT;</code> 한 줄 추가
+          <br>🟢 <strong>[수정 6]</strong> v_zip_col 결정 코드 다음에 v_dt_col 결정 코드 12줄 추가
+          <br>🟡 <strong>[수정 7]</strong> 동적 SQL 의 <code>refine_dtm</code> 하드코딩 2곳 → <code>v_dt_col</code> 변수 사용
         </p>
 
-        <div class="fix-box"><strong>2026-05-28</strong> &mdash; <code>gdpslptl.sp_stat_refine</code>: 대소문자 + 컬럼명 혼재 (refine_zip_cd vs refine_zipno) 동적 처리 / 적용 예정</div>
+        <div class="fix-box"><strong>2026-05-28</strong> &mdash; <code>gdpslptl.sp_stat_refine</code>: 대소문자 처리 + 컬럼명 혼재 (refine_zip_cd/refine_zipno, refine_dt/refine_dtm/refine_dttm) 동적 처리 / 적용 예정</div>
       </div>
     </div>
   </div>
