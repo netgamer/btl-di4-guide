@@ -766,13 +766,59 @@ WHERE n.nspname = 'gdpslptl' AND p.proname = 'sp_saeol_merge_all';
         <div class="fix-box"><strong>2026-05-28</strong> &mdash; 운영 적용 예정</div>
       </div>
 
-      <div class="section"><h4>같은 패턴 의심 routine (미적용 3개)</h4>
+      <div class="section"><h4>같은 패턴 의심 routine (미적용 3개) — 처리 현황</h4>
         <p>2026-05-27 1차 적용 시 충돌로 미적용된 routine 들. 같은 에러가 나면 동일 방식으로 처리:</p>
-        <ul style="margin-left:20px; font-size:13px;">
-          <li><code>gdpslptl.sp_colct_stat_init(text, text)</code></li>
-          <li><code>gdpslptl.sp_saeol_merge_all()</code> ← 이번 케이스</li>
-          <li><code>gdpslptl.sp_upload_save_cd_chck(text)</code></li>
-        </ul>
+        <table class="change-table">
+          <tr><th>Routine</th><th>처리</th></tr>
+          <tr><td><code>gdpslptl.sp_colct_stat_init(text, text)</code></td><td>미처리 (에러 발생 시 동일 방식)</td></tr>
+          <tr><td><code>gdpslptl.sp_saeol_merge_all()</code></td><td>2026-05-28 처리</td></tr>
+          <tr><td><code>gdpslptl.sp_upload_save_cd_chck(text)</code></td><td>2026-05-28 처리</td></tr>
+        </table>
+      </div>
+
+      <div class="section"><h4>적용 사례 2: <code>gdpslptl.sp_upload_save_cd_chck(text)</code></h4>
+        <div class="warn-box" style="margin-bottom:8px;">⚠️ 이 SQL 은 <strong><code>gdpslptl.sp_upload_save_cd_chck</code> 전용</strong>입니다. 다른 routine 에 적용하지 마세요.</div>
+        <p class="sql-copy-label">prod 적용 SQL — 운영 DB 에서 실행 (백업 → DROP → CREATE):</p>
+        <div class="sql-copy-block">
+<textarea readonly>-- 1. 기존 정의 백업 (롤백 대비, 결과를 텍스트 파일로 저장 권장)
+SELECT pg_get_functiondef(p.oid) AS old_definition
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'gdpslptl' AND p.proname = 'sp_upload_save_cd_chck';
+
+-- 2. 기존 PROCEDURE 삭제
+DROP PROCEDURE IF EXISTS gdpslptl.sp_upload_save_cd_chck(p_param text);
+
+-- 3. FUNCTION 으로 재생성 (dev 의 정의)
+CREATE OR REPLACE FUNCTION gdpslptl.sp_upload_save_cd_chck(p_param text)
+ RETURNS character varying
+ LANGUAGE plpgsql
+AS $function$
+DECLARE v_save_cd varchar;
+BEGIN
+    SELECT a.save_cd INTO v_save_cd
+    FROM gdpslptl.tb_upload_sche a
+    JOIN gdpslptl.tb_open_inf b ON a.inf_id = b.inf_id
+    WHERE b.ds_id = p_param
+      AND a.save_cd <> 'N'
+      AND a.del_yn = 'N'
+    LIMIT 1;
+    RETURN COALESCE(v_save_cd, '');
+EXCEPTION
+    WHEN OTHERS THEN RETURN '';
+END $function$;
+
+-- 4. 검증: FUNCTION 으로 등록됐는지 확인
+SELECT p.proname,
+       CASE p.prokind WHEN 'f' THEN 'FUNCTION' WHEN 'p' THEN 'PROCEDURE' END AS kind,
+       pg_get_function_identity_arguments(p.oid) AS args
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'gdpslptl' AND p.proname = 'sp_upload_save_cd_chck';
+-- 결과: FUNCTION / p_param text 로 나와야 함</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <div class="fix-box"><strong>2026-05-28</strong> &mdash; 운영 적용 예정</div>
       </div>
 
       <div class="section"><h4>이전 사례 (collect_cnt)</h4>
