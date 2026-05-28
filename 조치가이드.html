@@ -878,6 +878,17 @@ FROM
         <strong>예외 케이스:</strong> 이 에러는 DB 의 routine (FUNCTION/PROCEDURE) 정의 자체를 바꿔야 하므로 BTL Designer 로 처리 불가능. <strong>예외적으로 SQL 직접 처리</strong>가 유일한 방법.
       </div>
 
+      <div class="info-box" style="background:#fff3e0; border-left:4px solid #e65100;">
+        <strong>🛡️ 안전 4단계 원칙 (필수):</strong> S-1 변환은 반드시 STEP 1~4 순서로 진행합니다.
+        <ol style="margin-left:20px; margin-top:6px;">
+          <li><strong>STEP 1 — 미리보기:</strong> 변환 대상 PROCEDURE 목록 확인 (실제 변경 없음)</li>
+          <li><strong>STEP 2 — 충돌 체크:</strong> 같은 이름의 PROCEDURE+FUNCTION 공존 여부 확인</li>
+          <li><strong>STEP 3 — 실제 변환:</strong> 안전 체크 (같은 시그니처 FUNCTION 있으면 SKIP) 포함된 DO 블록 실행</li>
+          <li><strong>STEP 4 — 결과 검증:</strong> 변환된 PROCEDURE 0개 / FUNCTION 신규 확인</li>
+        </ol>
+        <strong>핵심 안전장치:</strong> <code>prokind = 'p'</code> 필터로 PROCEDURE 만 대상. FUNCTION 은 절대 안 건드림.
+      </div>
+
       <div class="section"><h4>에러 메시지</h4>
         <div class="error-box">EL00661 - xxx 실행시 SQLException이 발생하였습니다.
 원인: ERROR: [스키마].[이름]() is a procedure
@@ -1098,15 +1109,52 @@ ORDER BY p.proname;</textarea>
         <div class="fix-box"><strong>2026-05-28</strong> &mdash; SP_STAT_REFINE, SP_STAT_DAY, SP_STAT_DAY_TMP, SP_SYNC_SIGUN_CD, SP_DATA_COND_DE, SP_MAP_SRCH_INF, SP_DS_HIS_LOAD 등 일괄 변환 예정</div>
       </div>
 
-      <div class="section"><h4>적용 사례 4: <code>gdpcl</code> 스키마 일괄 변환</h4>
-        <p>gdpcl 스키마에도 같은 패턴 발견 (예: <code>sp_ehojo_gg_expnd_excut_cost</code>). gdpslptl 과 동일한 방식으로 일괄 처리.</p>
-        <p class="sql-copy-label">gdpcl 스키마 일괄 변환 SQL:</p>
+      <div class="section"><h4>적용 사례 4: <code>gdpcl</code> 스키마 일괄 변환 (안전 4단계)</h4>
+        <p>gdpcl 스키마에도 같은 패턴 발견 (예: <code>sp_ehojo_gg_expnd_excut_cost</code>). 안전 4단계 원칙 적용.</p>
+
+        <p class="sql-copy-label">STEP 1 — 변환 대상 미리보기 (실제 변경 없음):</p>
+        <div class="sql-copy-block">
+<textarea readonly>-- gdpcl 의 sp_* PROCEDURE 목록 (변환 대상)
+SELECT
+    p.proname,
+    pg_get_function_arguments(p.oid) AS args,
+    CASE p.prokind WHEN 'p' THEN 'PROCEDURE' WHEN 'f' THEN 'FUNCTION' END AS kind
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'gdpcl'
+  AND p.prokind = 'p'
+  AND p.proname LIKE 'sp_%'
+ORDER BY p.proname;</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <p style="font-size:12px; color:#666;">→ 결과에 PROCEDURE 만 나오는지 확인. FUNCTION 이 나오면 안 됨.</p>
+
+        <p class="sql-copy-label">STEP 2 — 충돌 가능성 체크:</p>
+        <div class="sql-copy-block">
+<textarea readonly>-- 같은 이름의 PROCEDURE + FUNCTION 공존 여부
+SELECT
+    p.proname,
+    COUNT(*) FILTER (WHERE p.prokind = 'p') AS procedure_count,
+    COUNT(*) FILTER (WHERE p.prokind = 'f') AS function_count
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'gdpcl'
+  AND p.proname LIKE 'sp_%'
+GROUP BY p.proname
+HAVING COUNT(*) FILTER (WHERE p.prokind = 'p') > 0
+   AND COUNT(*) FILTER (WHERE p.prokind = 'f') > 0;</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <p style="font-size:12px; color:#666;">→ 결과 없으면 안전. 있어도 STEP 3 의 SKIP 로직이 처리.</p>
+
+        <p class="sql-copy-label">STEP 3 — 실제 변환 (안전 체크 포함):</p>
         <div class="sql-copy-block">
 <textarea readonly>DO $$
 DECLARE
     rec record;
     new_def text;
     has_out boolean;
+    existing_func_count int;
 BEGIN
     FOR rec IN
         SELECT p.oid, p.proname,
@@ -1120,23 +1168,35 @@ BEGIN
           AND p.proname LIKE 'sp_%'
         ORDER BY p.proname
     LOOP
+        -- 안전 체크: 같은 시그니처 FUNCTION 이미 있으면 SKIP
+        SELECT COUNT(*) INTO existing_func_count
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'gdpcl'
+          AND p.proname = rec.proname
+          AND p.prokind = 'f'
+          AND pg_get_function_identity_arguments(p.oid) = rec.args;
+
+        IF existing_func_count > 0 THEN
+            RAISE NOTICE '!! SKIP: gdpcl.%(%) - 같은 시그니처 FUNCTION 이미 존재', rec.proname, rec.args;
+            CONTINUE;
+        END IF;
+
         has_out := rec.full_args ~* '(\mOUT\M|\mINOUT\M)';
 
-        RAISE NOTICE '=== gdpcl.%(%) ===', rec.proname, rec.args;
-        RAISE NOTICE '%', rec.def;
+        RAISE NOTICE '=== gdpcl.%(%) PROCEDURE 변환 시작 ===', rec.proname, rec.args;
+        RAISE NOTICE '백업 정의: %', rec.def;
 
         IF has_out THEN
             new_def := regexp_replace(rec.def,
                 'CREATE OR REPLACE PROCEDURE',
-                'CREATE OR REPLACE FUNCTION',
-                'i');
-            RAISE NOTICE '  (OUT 파라미터 있음 — RETURNS 절 미추가)';
+                'CREATE OR REPLACE FUNCTION', 'i');
+            RAISE NOTICE '  (OUT 파라미터 있음 - RETURNS 절 미추가)';
         ELSE
             new_def := regexp_replace(rec.def,
                 'CREATE OR REPLACE PROCEDURE\s+(\S+\s*\([^)]*\))',
-                E'CREATE OR REPLACE FUNCTION \\1\n RETURNS void',
-                'i');
-            RAISE NOTICE '  (OUT 없음 — RETURNS void 추가)';
+                E'CREATE OR REPLACE FUNCTION \\1\n RETURNS void', 'i');
+            RAISE NOTICE '  (OUT 없음 - RETURNS void 추가)';
         END IF;
 
         EXECUTE format('DROP PROCEDURE %I.%I(%s)', 'gdpcl', rec.proname, rec.args);
@@ -1144,16 +1204,31 @@ BEGIN
 
         RAISE NOTICE 'Converted: gdpcl.%(%)', rec.proname, rec.args;
     END LOOP;
-END $$;
+END $$;</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
 
--- 검증
+        <p class="sql-copy-label">STEP 4 — 결과 검증:</p>
+        <div class="sql-copy-block">
+<textarea readonly>-- PROCEDURE 남은 것 (0 이어야 함)
 SELECT count(*) AS remaining_procedures
 FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
-WHERE n.nspname = 'gdpcl' AND p.prokind = 'p' AND p.proname LIKE 'sp_%';</textarea>
+WHERE n.nspname = 'gdpcl' AND p.prokind = 'p' AND p.proname LIKE 'sp_%';
+
+-- 변환된 FUNCTION 목록
+SELECT p.proname,
+       pg_get_function_arguments(p.oid) AS args,
+       pg_get_function_result(p.oid) AS returns
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'gdpcl' AND p.prokind = 'f' AND p.proname LIKE 'sp_%'
+ORDER BY p.proname;</textarea>
           <button class="copy-btn" onclick="copySql(this)">복사</button>
         </div>
-        <p style="font-size:12px; color:#666;"><strong>응용:</strong> 위 SQL 의 <code>gdpcl</code> 부분을 다른 스키마명 (예: <code>gdpdo</code>, <code>public</code>) 으로 바꿔서 다른 스키마도 처리 가능. 또는 <code>p.proname LIKE 'sp_%'</code> 조건을 빼면 모든 PROCEDURE 변환 (주의 — 시스템 PROCEDURE 도 변환되니 권장 안 함).</p>
+
+        <p style="font-size:12px; color:#666;"><strong>응용:</strong> 위 SQL 의 <code>gdpcl</code> 부분을 다른 스키마명 (예: <code>gdpdo</code>, <code>public</code>) 으로 바꿔서 다른 스키마도 처리 가능. 4단계 모두 같은 스키마명으로 변경 필요.</p>
+
         <div class="fix-box"><strong>2026-05-28</strong> &mdash; <code>sp_ehojo_gg_expnd_excut_cost</code>, <code>sp_ehojo_gg_budget_excut_stus</code>, <code>sp_ehojo_gg_contract_status</code>, <code>sp_ehojo_gg_expnd_excut_genrl</code> 등 일괄 변환 예정</div>
       </div>
     </div>
