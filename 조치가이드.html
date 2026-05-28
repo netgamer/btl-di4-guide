@@ -613,6 +613,57 @@ WHERE SUBSTR(RAFAL_OBSVT_DIV,1,1) ='1'</textarea>
         <div class="fix-box"><strong>2026-05-28</strong> &mdash; 운영 적용 예정</div>
       </div>
 
+      <div class="section"><h4>적용 사례 4: <code>J_SW_TB_WNTY_REGIST_DSPSN_SUM_C_01</code> — NO() + APRV_YN + ETL prefix</h4>
+        <p>장애인 등록 처분 합계 잡 — rafal_obsvt 와 동일한 3가지 패턴 (Oracle ROWNUM 변환 + char(1) 오버플로 + prefix 누락).</p>
+        <div class="error-box">EL10714 - 추출에서 초기화시 오류가 발생하였습니다.
+Cause: 오류: no() 이름의 함수가 없음. 지정된 이름 및 인자 자료형과 일치하는 함수가 없습니다.
+Position: 12 SQLState = 42883</div>
+        <div class="warn-box" style="margin-bottom:8px;">⚠️ 이 SQL 은 <strong><code>J_SW_TB_WNTY_REGIST_DSPSN_SUM_C_01</code> 잡 전용</strong>입니다. (소스: <code>gdpcl.tb_wnty_regist_dspsn_sum_c</code>)</div>
+        <p class="sql-copy-label">수정 후 SQL — 추출 노드의 SQL 수동 입력 칸에 붙여넣기:</p>
+        <div class="sql-copy-block">
+<textarea readonly>SELECT
+  ROW_NUMBER() OVER () AS NO,
+  tb_wnty_regist_dspsn_sum_c.STD_YY AS CRTR_YR,
+  tb_wnty_regist_dspsn_sum_c.OBSTCL_TYPE_NM AS OBSTCL_TYPE_NM,
+  tb_wnty_regist_dspsn_sum_c.TOT_SUM AS TOT_SUM,
+  tb_wnty_regist_dspsn_sum_c.MALE_TOT_SUM AS MALE_TOT_SUM,
+  tb_wnty_regist_dspsn_sum_c.FEMALE_TOT_SUM AS FEMALE_TOT_SUM,
+  tb_wnty_regist_dspsn_sum_c.RK1_TOT_SUM AS RK1_TOT_SUM,
+  tb_wnty_regist_dspsn_sum_c.RK1_MALE_CNT AS RK1_MALE_CNT,
+  tb_wnty_regist_dspsn_sum_c.RK1_FEMALE_CNT AS RK1_FEMALE_CNT,
+  tb_wnty_regist_dspsn_sum_c.RK2_TOT_SUM AS RK2_TOT_SUM,
+  tb_wnty_regist_dspsn_sum_c.RK2_MALE_CNT AS RK2_MALE_CNT,
+  tb_wnty_regist_dspsn_sum_c.RK2_FEMALE_CNT AS RK2_FEMALE_CNT,
+  tb_wnty_regist_dspsn_sum_c.RK3_TOT_SUM AS RK3_TOT_SUM,
+  tb_wnty_regist_dspsn_sum_c.RK3_MALE_CNT AS RK3_MALE_CNT,
+  tb_wnty_regist_dspsn_sum_c.RK3_FEMALE_CNT AS RK3_FEMALE_CNT,
+  tb_wnty_regist_dspsn_sum_c.RK4_TOT_SUM AS RK4_TOT_SUM,
+  tb_wnty_regist_dspsn_sum_c.RK4_MALE_CNT AS RK4_MALE_CNT,
+  tb_wnty_regist_dspsn_sum_c.RK4_FEMALE_CNT AS RK4_FEMALE_CNT,
+  tb_wnty_regist_dspsn_sum_c.RK5_TOT_SUM AS RK5_TOT_SUM,
+  tb_wnty_regist_dspsn_sum_c.RK5_MALE_CNT AS RK5_MALE_CNT,
+  tb_wnty_regist_dspsn_sum_c.RK5_FEMALE_CNT AS RK5_FEMALE_CNT,
+  tb_wnty_regist_dspsn_sum_c.RK6_TOT_SUM AS RK6_TOT_SUM,
+  tb_wnty_regist_dspsn_sum_c.RK6_MALE_CNT AS RK6_MALE_CNT,
+  tb_wnty_regist_dspsn_sum_c.RK6_FEMALE_CNT AS RK6_FEMALE_CNT,
+  tb_wnty_regist_dspsn_sum_c.data_colct_de AS DATA_COLCT_DE,
+  'N' AS APRV_YN,
+  tb_wnty_regist_dspsn_sum_c.ETL_LDADNG_DTM AS ETL_LDADNG_DTM,
+  tb_wnty_regist_dspsn_sum_c.SERSILLNS_DSPSN_CNT_SUM AS SERSILLNS_DSPSN_CNT_SUM,
+  tb_wnty_regist_dspsn_sum_c.SLGHILLNS_DSPSN_CNT_SUM AS SLGHILLNS_DSPSN_CNT_SUM
+FROM
+  gdpcl.tb_wnty_regist_dspsn_sum_c tb_wnty_regist_dspsn_sum_c</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+        <table class="change-table">
+          <tr><th>#</th><th>변경 전</th><th>변경 후</th><th>이유</th></tr>
+          <tr><td>1</td><td><code>NO() OVER () AS NO</code></td><td><code>ROW_NUMBER() OVER () AS NO</code></td><td>Oracle ROWNUM → PG ROW_NUMBER</td></tr>
+          <tr><td>2</td><td><code>'APRV_YN' AS APRV_YN</code></td><td><code>'N' AS APRV_YN</code></td><td>char(1) 오버플로 (J-1 패턴)</td></tr>
+          <tr><td>3</td><td><code>ETL_LDADNG_DTM AS</code></td><td><code>tb_wnty_regist_dspsn_sum_c.ETL_LDADNG_DTM AS</code></td><td>테이블 prefix 누락</td></tr>
+        </table>
+        <div class="fix-box"><strong>2026-05-28</strong> &mdash; 운영 적용 예정</div>
+      </div>
+
       <div class="section"><h4>적용 사례 2: <code>J_TB_GG_JOBABA_RECRU_ST_C_01</code> (ref=52369) — REPLACE 치환 + 인자 소실</h4>
         <p>"1명", "2명" 같은 한글 포함 숫자에서 "명" 제거 후 numeric 변환 필요. 원본 <code>REPLACE(TRIM(col), '명', '')</code> 가 함수명 + 두번째 인자 모두 깨짐.</p>
         <div class="warn-box" style="margin-bottom:8px;">⚠️ 이 SQL 은 <strong><code>J_TB_GG_JOBABA_RECRU_ST_C_01</code> 잡 전용</strong>입니다. 다른 잡에 붙여넣지 마세요. (소스: <code>gdpcl.tb_gg_jobaba_recru_st_c</code>)</div>
