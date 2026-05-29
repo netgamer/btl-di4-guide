@@ -1830,6 +1830,88 @@ SELECT count(*) FROM gdpslptl.tb_stat_use_org    WHERE yyyymmdd = '20260528';</t
 
         <div class="fix-box"><strong>2026-05-29</strong> &mdash; <code>gdpslptl.sp_stat_day</code>: timestamp/date 비교 5곳에 명시적 <code>::timestamp</code> 캐스트 추가 / 적용 예정</div>
       </div>
+
+      <div class="section"><h4>적용 사례 8: <code>WP_GDTO_REFINE_LOG_01</code> 워크플랜 7개 SP 일괄 패치 (v1 사고 → v2 복구)</h4>
+
+        <div class="warn-box" style="background:#ffebee; border-left:4px solid #c62828;">
+          <strong>⚠ 이 사례는 운영 사고 사후 보고서입니다.</strong>
+          v1 패치에서 <code>sp_stat_refine</code> 을 추측 본문 (INSERT 컬럼 6개 짜리) 으로 통째 교체했다가
+          <code>column "inf_id" of relation "tb_stat_refine" does not exist</code> 에러로 운영이 깨졌고, v2 로 복구했습니다.
+          <br><br>
+          <strong>교훈:</strong> <em>잘 동작하던 SP 본문은 절대 통째 교체하지 않는다.</em>
+          반드시 운영에서 추출한 원본 위에 최소 변경만 적용한다.
+        </div>
+
+        <h5 style="margin-top:14px;">대상 워크플랜 노드 순서</h5>
+        <pre style="font-size:12px; background:#f5f5f5; padding:10px; border-radius:4px;">
+Start → SP_STAT_REFINE → SP_STAT_DAY → SP_STAT_DAY_TMP
+      → SP_SYNC_SIGUN_CD → SP_DATA_COND_DE → SP_MAP_SRCH_INF
+      → SP_DS_HIS_LOAD → SQL실행</pre>
+
+        <h5 style="margin-top:14px;">v1 (2026-05-29 13시) — 7개 일괄 패치 시도</h5>
+        <table class="change-table" style="font-size:12px;">
+          <tr><th>SP</th><th>v1 의도</th><th>결과</th></tr>
+          <tr style="background:#ffebee;">
+            <td><code>sp_stat_refine</code></td>
+            <td>❌ 추측한 단순화 본문 (6 컬럼 INSERT) 으로 통째 교체</td>
+            <td><strong>운영 깨짐</strong> — column "inf_id" does not exist</td>
+          </tr>
+          <tr><td><code>sp_stat_day</code></td><td>timestamp/date 비교 <code>::timestamp</code> 캐스트 5곳</td><td>OK</td></tr>
+          <tr><td><code>sp_stat_day_tmp</code></td><td>운영 NOT_FOUND → stub 함수 신규</td><td>OK</td></tr>
+          <tr><td><code>sp_sync_sigun_cd</code></td><td>운영본 그대로 (재정의만)</td><td>OK</td></tr>
+          <tr><td><code>sp_data_cond_de</code></td><td>COMMIT 2 + ROLLBACK 1 제거</td><td>적용 안 됨 / 미적용</td></tr>
+          <tr><td><code>sp_map_srch_inf</code></td><td>COMMIT 2 + ROLLBACK 1 제거</td><td>적용 안 됨 / 미적용</td></tr>
+          <tr><td><code>sp_ds_his_load</code></td><td>COMMIT 제거 + <code>quote_ident(lower(...))</code></td><td>적용 안 됨 / 미적용</td></tr>
+        </table>
+
+        <h5 style="margin-top:14px;">v2 (2026-05-29 15시) — <code>sp_stat_refine</code> 단일 복구</h5>
+        <p>운영에서 추출한 <strong>정상 작동본</strong> (yyyymm + sigun_cd + ds_id + 17 컬럼 INSERT, v_zip_col/v_dt_col 동적 처리 포함) 으로 복구. 다른 6 개 SP 는 <em>일절 건드리지 않음</em>.</p>
+
+        <div class="sql-copy-block">
+<textarea readonly>-- v2 패치 본체 (sp_stat_refine 단일 복구)
+-- C:\Users\user\dev\DI3_License\dumps\2026-05-29_WP_GDTO_REFINE_LOG_01_patch\v2\01_patch_all.sql
+
+\set ON_ERROR_STOP on
+SET search_path TO gdpslptl, public;
+BEGIN;
+
+CREATE OR REPLACE FUNCTION gdpslptl.sp_stat_refine(p_date character varying)
+ RETURNS void LANGUAGE plpgsql AS $function$
+DECLARE
+    -- (운영 추출본 그대로 — 사용자 확인 정상본)
+    -- yyyymm, sigun_cd, ds_id, tot_cnt, refine_val_cnt, ...
+    -- v_zip_col / v_dt_col 동적 결정
+    -- quote_ident(lower(...))
+    ...
+END;
+$function$;
+
+COMMIT;</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+
+        <p style="font-size:12px; color:#666; margin-top:8px;">
+          전체 본문은 적용 사례 6 의 통째 소스 참고 또는 운영 추출본
+          <code>C:\Users\user\dev\DI3_License\tmp_sp_extract\gdpslptl_sp_all_165452\sp_sp_stat_refine.sql</code> 사용.
+        </p>
+
+        <h5 style="margin-top:14px;">패치 키트 위치</h5>
+        <table class="change-table" style="font-size:12px;">
+          <tr><th>버전</th><th>경로</th><th>상태</th></tr>
+          <tr><td>v1</td><td><code>dumps/2026-05-29_WP_GDTO_REFINE_LOG_01_patch/v1/</code></td><td>⚠ 사용 금지 (sp_stat_refine 깨뜨림)</td></tr>
+          <tr><td>v2</td><td><code>dumps/2026-05-29_WP_GDTO_REFINE_LOG_01_patch/v2/</code></td><td>✅ 사용 가능 (sp_stat_refine 단일 복구)</td></tr>
+        </table>
+
+        <h5 style="margin-top:14px;">사고에서 얻은 안전 4 원칙 (이후 패치에 모두 적용)</h5>
+        <ol style="margin-left:20px; font-size:13px;">
+          <li><strong>운영에 있는 본문을 먼저 추출</strong>한다 (<code>pg_get_functiondef</code>). 추측하지 않는다.</li>
+          <li><strong>본문 통째 교체 금지.</strong> 운영본 위에 최소 변경만 적용한다.</li>
+          <li><strong>이미 잘 동작하던 SP 는 패치 대상에 포함시키지 않는다.</strong> 메모리/가이드의 "이미 손댄 SP 목록" 확인 후 진행.</li>
+          <li><strong>일괄 패치는 <code>BEGIN ... COMMIT</code> 한 트랜잭션</strong>으로 묶어 한 개라도 실패하면 전체 롤백되게 한다.</li>
+        </ol>
+
+        <div class="fix-box"><strong>2026-05-29</strong> &mdash; v1 사고 → v2 복구 완료. 운영 메타 검증 결과 <code>sp_data_cond_de</code> / <code>sp_map_srch_inf</code> / <code>sp_ds_his_load</code> 는 v1 적용이 실제로 안 됐음 (COMMIT/ROLLBACK 잔존). 추후 별도 검토.</div>
+      </div>
     </div>
   </div>
 
