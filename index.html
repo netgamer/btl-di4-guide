@@ -1912,6 +1912,85 @@ COMMIT;</textarea>
 
         <div class="fix-box"><strong>2026-05-29</strong> &mdash; v1 사고 → v2 복구 완료. 운영 메타 검증 결과 <code>sp_data_cond_de</code> / <code>sp_map_srch_inf</code> / <code>sp_ds_his_load</code> 는 v1 적용이 실제로 안 됐음 (COMMIT/ROLLBACK 잔존). 추후 별도 검토.</div>
       </div>
+
+      <div class="section"><h4>적용 사례 9: <code>gdpslptl.sp_open_prss_stats_dailly</code> — COMMIT/ROLLBACK + NOT NULL 컬럼 누락 (2단계)</h4>
+
+        <p><code>WP_SP_OPEN_PRSS_STATS_DAILY_01</code> 워크플랜 노드는 이 SP 하나뿐. 두 단계로 진행한 사례.</p>
+
+        <h5 style="margin-top:14px;">1단계 (v1) — COMMIT/ROLLBACK 3개 제거</h5>
+        <div class="error-box">EL00661 - SP_OPEN_PRSS_STATS_DAILLY 실행시 SQLException
+원인: ERROR: invalid transaction termination
+Where: PL/pgSQL function sp_open_prss_stats_dailly() line 88 at ROLLBACK
+SQLState = 2D000</div>
+
+        <p>본문에서 다음 3 곳 주석 처리:</p>
+        <table class="change-table" style="font-size:12px;">
+          <tr><th>line</th><th>변경 전</th><th>변경 후</th></tr>
+          <tr><td>87 (정상 path)</td><td><code>COMMIT;</code></td><td><code>-- COMMIT;</code></td></tr>
+          <tr><td>91 (EXCEPTION)</td><td><code>ROLLBACK;</code></td><td><code>-- ROLLBACK;</code></td></tr>
+          <tr><td>100 (EXCEPTION)</td><td><code>COMMIT;</code></td><td><code>-- COMMIT;</code></td></tr>
+        </table>
+
+        <h5 style="margin-top:14px;">2단계 (v2) — <code>LOG_D_SEQ</code> NOT NULL 채우기</h5>
+        <p>v1 적용 후 다음 에러:</p>
+        <div class="error-box">ERROR: null value in column "log_d_seq" of relation "tb_datalog_d"
+       violates not-null constraint  (SQLState 23502)
+Where: PL/pgSQL function sp_open_prss_stats_dailly() line 93 at SQL statement</div>
+
+        <div class="warn-box" style="background:#fff3e0; border-left:4px solid #ef6c00;">
+          <strong>⚠ 운영 환경 quirk:</strong> <code>gdpslptl.tb_datalog_d.log_d_seq</code> 는 PRIMARY KEY + NOT NULL 이지만 운영에 default sequence 가 존재하지 않음. 이전 INSERT 들이 어디서 채워졌는지 출처 불명. <strong>이 테이블에 INSERT 하는 모든 SP 패치 시 <code>LOG_D_SEQ</code> 컬럼을 명시하고 직접 값을 채워야 함.</strong>
+        </div>
+
+        <p>진단 SQL (운영에서 실행):</p>
+        <div class="sql-copy-block">
+<textarea readonly>-- log_d_seq 관련 sequence 후보
+SELECT n.nspname || '.' || c.relname AS seq_name, s.last_value
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+LEFT JOIN pg_sequences s ON s.schemaname = n.nspname AND s.sequencename = c.relname
+WHERE c.relkind = 'S' AND n.nspname = 'gdpslptl'
+  AND (c.relname ~* 'datalog|log_d|tb_data')
+ORDER BY c.relname;
+-- → 0 rows (존재하지 않음 확인)
+
+-- 현재 max
+SELECT COALESCE(MAX(log_d_seq), 0) AS current_max,
+       COALESCE(MAX(log_d_seq), 0) + 1 AS next_value
+FROM gdpslptl.tb_datalog_d;
+-- → current_max=14941, next_value=14942</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+
+        <p>해결 — INSERT 2 곳 (정상 path + EXCEPTION path) 에 <code>LOG_D_SEQ</code> 컬럼 추가:</p>
+        <div class="sql-copy-block">
+<textarea readonly>-- v2 패치 핵심 변경 (INSERT 2곳 동일 패턴)
+INSERT INTO gdpslptl.tb_datalog_d
+    (LOG_D_SEQ, RAISE_DATETIME, SUCC_FAIL_YN, SUCC_FAIL_MSG, LOG_DESC,
+     LOG_M_SEQ, UP_LOG_D_SEQ, LOG_LEVEL, FINISH_DATETIME)
+    VALUES(
+        (SELECT COALESCE(MAX(LOG_D_SEQ), 0) + 1 FROM gdpslptl.tb_datalog_d),
+        CURRENT_TIMESTAMP, 'S', '성공', '개방통계집계 배치 실행 성공',
+        1, 0, 0, CURRENT_TIMESTAMP
+    );</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+
+        <p style="font-size:12px; color:#666; margin-top:8px;">
+          <strong>왜 MAX+1 이 안전한가:</strong>
+          <br>① 일일 배치 (23:50) 에서만 INSERT → 동시성 충돌 가능성 낮음
+          <br>② DDL (sequence 신설) 변경은 다른 부서 영향 가능 → 회피
+          <br>③ EXCEPTION 핸들러 path 도 같은 트랜잭션 안 → MAX 일관성 유지
+        </p>
+
+        <h5 style="margin-top:14px;">패치 키트 위치</h5>
+        <table class="change-table" style="font-size:12px;">
+          <tr><th>버전</th><th>경로</th><th>상태</th></tr>
+          <tr><td>v1</td><td><code>dumps/2026-05-29_WP_SP_OPEN_PRSS_STATS_DAILY_01_patch/v1/</code></td><td>⚠ 부분 — LOG_D_SEQ NOT NULL 에러 남음</td></tr>
+          <tr><td>v2</td><td><code>dumps/2026-05-29_WP_SP_OPEN_PRSS_STATS_DAILY_01_patch/v2/</code></td><td>✅ 사용 가능 — BTL 워크플랜 통과 확인</td></tr>
+        </table>
+
+        <div class="fix-box"><strong>2026-05-29 18시</strong> &mdash; v2 운영 적용 후 BTL 워크플랜 <code>WP_SP_OPEN_PRSS_STATS_DAILY_01</code> 정상 통과. 동일 패턴 (tb_datalog_d INSERT) 을 가진 다른 SP 도 같은 방식 적용 필요.</div>
+      </div>
     </div>
   </div>
 
