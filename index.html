@@ -1642,6 +1642,194 @@ $function$;</div>
 
         <div class="fix-box"><strong>2026-05-28</strong> &mdash; <code>gdpslptl.sp_stat_refine</code>: 대소문자 처리 + 컬럼명 혼재 (refine_zip_cd/refine_zipno, refine_dt/refine_dtm/refine_dttm) 동적 처리 / 적용 예정</div>
       </div>
+
+      <div class="section"><h4>적용 사례 7: <code>gdpslptl.sp_stat_day</code> — timestamp vs date 비교 모호성</h4>
+        <p>FUNCTION 변환 후 통계 집계 실행 시 다음 에러 발생:</p>
+        <div class="error-box">ERROR: operator is not unique: timestamp without time zone >= date
+HINT: Could not choose a best candidate operator. You might need to add explicit type casts.</div>
+
+        <div class="warn-box" style="background:#fff3e0; border-left:4px solid #ef6c00;">
+          <strong>원인:</strong> Oracle 에서는 <code>DATE</code> 타입이 시간 정보를 포함하므로 <code>timestamp ≥ DATE</code> 비교가 모호하지 않음.
+          그러나 PG 에서는 <code>DATE + integer = DATE</code> 결과이고, <code>timestamp ≥ date</code> 비교에 대한 후보 연산자가 여러 개 존재하여 모호함 발생.
+          <br>→ 명시적으로 <code>::timestamp</code> 캐스트 필요.
+        </div>
+
+        <h5 style="margin-top:14px;">수정 — 5곳의 timestamp/date 비교에 명시적 캐스트 추가</h5>
+        <p>BTL Designer → 리포지토리 탐색기 → 모델 → <code>gdpslptl</code> → <code>sp_stat_day</code> 더블클릭 → 본문에서 다음 5곳 수정:</p>
+
+        <table class="change-table" style="font-size:12px;">
+          <tr><th>위치</th><th>변경 전</th><th>변경 후</th></tr>
+          <tr><td>line 63<br>(1-1 INSERT)</td><td><code>a.open_dttm &lt; CURRENT_DATE + 1</code></td><td><code>a.open_dttm &lt; (CURRENT_DATE + 1)::timestamp</code></td></tr>
+          <tr><td>line 98<br>(1-2 sub-select)</td><td><code>a.open_dttm &lt; CURRENT_DATE + 1</code></td><td><code>a.open_dttm &lt; (CURRENT_DATE + 1)::timestamp</code></td></tr>
+          <tr><td>line 101<br>(tb_catalog_info)</td><td><code>reg_dttm &lt; CURRENT_DATE + 1</code></td><td><code>reg_dttm &lt; (CURRENT_DATE + 1)::timestamp</code></td></tr>
+          <tr><td>line 104<br>(tb_open_inf_visual)</td><td><code>reg_dttm &lt; CURRENT_DATE + 1</code></td><td><code>reg_dttm &lt; (CURRENT_DATE + 1)::timestamp</code></td></tr>
+          <tr><td>line 130<br>(tb_log_open_inf_srv)</td><td><code>l.reg_dttm &gt;= var_work_date AND l.reg_dttm &lt; var_work_date + 1</code></td><td><code>l.reg_dttm &gt;= var_work_date::timestamp AND l.reg_dttm &lt; (var_work_date + 1)::timestamp</code></td></tr>
+        </table>
+
+        <h5 style="margin-top:14px;">✂️ 완전한 수정 본문 (통째 교체 — 색상 표시)</h5>
+        <p style="font-size:12px; color:#666;">🟡 = 변경된 줄. 변경 위치 5곳 외 본문은 운영 원본 그대로 유지.</p>
+        <div class="full-source"><span class="keyword">CREATE OR REPLACE FUNCTION</span> gdpslptl.sp_stat_day(p_date <span class="keyword">character varying</span>)
+ <span class="keyword">RETURNS</span> void
+ <span class="keyword">LANGUAGE</span> plpgsql
+<span class="keyword">AS</span> $function$
+<span class="keyword">DECLARE</span>
+    p_retval INTEGER;
+    p_retmsg VARCHAR(500);
+
+    v_job_name      VARCHAR(200) := <span class="string">'SP_STAT_DAY'</span>;
+    v_job_tag       VARCHAR(50);
+    v_source        VARCHAR(500);
+    v_target        VARCHAR(500);
+    v_rowcount      INTEGER := 0;
+    v_message       VARCHAR(2000);
+
+    var_work_date   DATE;
+<span class="keyword">BEGIN</span>
+    <span class="keyword">IF</span> (length(trim(p_date)) = 8) <span class="keyword">THEN</span>
+        var_work_date := to_date(p_date, <span class="string">'YYYYMMDD'</span>);
+    <span class="keyword">ELSE</span>
+        var_work_date := <span class="keyword">CURRENT_DATE</span> - 1;
+    <span class="keyword">END IF</span>;
+
+    p_retval := 0;
+    p_retmsg := to_char(var_work_date, <span class="string">'YYYY-MM-DD'</span>) || <span class="string">' 통계 생성 시작'</span>;
+
+    <span class="keyword">INSERT INTO</span> tb_log_job (job_no, job_nm, job_tag, source, target, rowcount, message, reg_dttm)
+    <span class="keyword">VALUES</span> (nextval(<span class="string">'sq_log_job'</span>), v_job_name, <span class="string">'START'</span>, <span class="string">'TB_LOG_OPEN_INF_*'</span>, <span class="string">'TB_STAT_OPEN_*'</span>, 0, p_retmsg, <span class="keyword">CURRENT_TIMESTAMP</span>);
+
+    -- 1-1. 기관별 개방 통계
+    v_message := <span class="string">'기관별 개방 통계'</span>;
+    <span class="keyword">DELETE FROM</span> tb_stat_open_org;
+    <span class="keyword">GET DIAGNOSTICS</span> v_rowcount = ROW_COUNT;
+
+    <span class="keyword">IF</span> (v_rowcount &gt; 0) <span class="keyword">THEN</span>
+        <span class="keyword">INSERT INTO</span> tb_log_job (job_no, job_nm, job_tag, source, target, rowcount, message, reg_dttm)
+        <span class="keyword">VALUES</span> (nextval(<span class="string">'sq_log_job'</span>), v_job_name, <span class="string">'DELETE'</span>, <span class="string">'TB_STAT_OPEN_ORG'</span>, <span class="string">'TB_STAT_OPEN_ORG'</span>, v_rowcount, v_message, <span class="keyword">CURRENT_TIMESTAMP</span>);
+    <span class="keyword">END IF</span>;
+
+    <span class="keyword">INSERT INTO</span> tb_stat_open_org (org_cd, yyyymmdd, inf_cnt, srv_cnt, s_cnt, c_cnt, m_cnt, f_cnt, l_cnt, a_cnt, v_cnt, reg_dttm)
+    <span class="keyword">SELECT</span> o.org_cd_top, m.yyyymmdd, count(<span class="keyword">DISTINCT</span> m.inf_id), count(*)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'S'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'C'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'M'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'F'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'L'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'A'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'V'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , <span class="keyword">CURRENT_TIMESTAMP</span>
+    <span class="keyword">FROM</span> (
+        <span class="keyword">SELECT</span> a.inf_id, a.org_cd, b.srv_cd, to_char(a.open_dttm, <span class="string">'YYYYMMDD'</span>) <span class="keyword">AS</span> yyyymmdd
+        <span class="keyword">FROM</span> tb_open_inf a
+        <span class="keyword">INNER JOIN</span> tb_open_inf_srv b <span class="keyword">ON</span> a.inf_id = b.inf_id
+        <span class="keyword">WHERE</span> a.inf_state = <span class="string">'Y'</span>
+<span class="modified-line">          <span class="keyword">AND</span> a.open_dttm &lt; (<span class="keyword">CURRENT_DATE</span> + 1)::<span class="keyword">timestamp</span></span>
+          <span class="keyword">AND</span> b.srv_yn = <span class="string">'Y'</span>
+    ) m
+    <span class="keyword">INNER JOIN</span> tb_comm_org o <span class="keyword">ON</span> m.org_cd = o.org_cd
+    <span class="keyword">GROUP BY</span> o.org_cd_top, m.yyyymmdd;
+
+    <span class="keyword">GET DIAGNOSTICS</span> v_rowcount = ROW_COUNT;
+    <span class="keyword">IF</span> (v_rowcount &gt; 0) <span class="keyword">THEN</span>
+        <span class="keyword">INSERT INTO</span> tb_log_job (job_no, job_nm, job_tag, source, target, rowcount, message, reg_dttm)
+        <span class="keyword">VALUES</span> (nextval(<span class="string">'sq_log_job'</span>), v_job_name, <span class="string">'INSERT'</span>, <span class="string">'TB_OPEN_INF'</span>, <span class="string">'TB_STAT_OPEN_ORG'</span>, v_rowcount, v_message, <span class="keyword">CURRENT_TIMESTAMP</span>);
+    <span class="keyword">END IF</span>;
+
+    -- 1-2. 일별 개방 추이
+    v_message := <span class="string">'일별 개방 추이(어제 기준)'</span>;
+    <span class="keyword">DELETE FROM</span> tb_stat_open_prgs_d <span class="keyword">WHERE</span> yyyymmdd = to_char(var_work_date, <span class="string">'YYYYMMDD'</span>);
+
+    <span class="keyword">INSERT INTO</span> tb_stat_open_prgs_d (yyyymmdd, inf_cnt, srv_cnt, s_cnt, c_cnt, m_cnt, f_cnt, l_cnt, a_cnt, v_cnt, vn_cnt, ct_cnt, reg_dttm)
+    <span class="keyword">SELECT</span> to_char(var_work_date, <span class="string">'YYYYMMDD'</span>)
+         , count(<span class="keyword">DISTINCT</span> m.inf_id), count(*)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'S'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'C'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'M'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'F'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'L'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'A'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'V'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'VN'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'CT'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>)
+         , <span class="keyword">CURRENT_TIMESTAMP</span>
+    <span class="keyword">FROM</span> (
+        <span class="keyword">SELECT</span> a.inf_id, b.srv_cd <span class="keyword">FROM</span> tb_open_inf a
+        <span class="keyword">INNER JOIN</span> tb_open_inf_srv b <span class="keyword">ON</span> a.inf_id = b.inf_id
+<span class="modified-line">        <span class="keyword">WHERE</span> a.inf_state = <span class="string">'Y'</span> <span class="keyword">AND</span> a.open_dttm &lt; (<span class="keyword">CURRENT_DATE</span> + 1)::<span class="keyword">timestamp</span> <span class="keyword">AND</span> b.srv_yn = <span class="string">'Y'</span></span>
+        <span class="keyword">UNION ALL</span>
+<span class="modified-line">        <span class="keyword">SELECT</span> ctlg_id::text, <span class="string">'CT'</span> <span class="keyword">FROM</span> tb_catalog_info <span class="keyword">WHERE</span> reg_dttm &lt; (<span class="keyword">CURRENT_DATE</span> + 1)::<span class="keyword">timestamp</span></span>
+        <span class="keyword">UNION ALL</span>
+<span class="modified-line">        <span class="keyword">SELECT</span> vistn_srv_seq::text, <span class="string">'VN'</span> <span class="keyword">FROM</span> tb_open_inf_visual <span class="keyword">WHERE</span> reg_dttm &lt; (<span class="keyword">CURRENT_DATE</span> + 1)::<span class="keyword">timestamp</span> <span class="keyword">AND</span> use_yn = <span class="string">'Y'</span></span>
+    ) m;
+
+    -- 1-3. 기관별 활용 현황
+    v_message := <span class="string">'기관별 활용 추이(어제 기준)'</span>;
+    <span class="keyword">DELETE FROM</span> tb_stat_use_org <span class="keyword">WHERE</span> yyyymmdd = to_char(var_work_date, <span class="string">'YYYYMMDD'</span>);
+
+    <span class="keyword">INSERT INTO</span> tb_stat_use_org (yyyymmdd, org_cd, tot_use_cnt, s_use_cnt, t_use_cnt, c_use_cnt, m_use_cnt, f_use_cnt, l_use_cnt, a_use_cnt, save_use_cnt, file_use_cnt, link_use_cnt, api_use_cnt, apis_use_cnt, reg_dttm)
+    <span class="keyword">SELECT</span> to_char(var_work_date, <span class="string">'YYYYMMDD'</span>), list.org_cd
+         , sum(tot_use_cnt), sum(s_use_cnt), sum(t_use_cnt), sum(c_use_cnt), sum(m_use_cnt), sum(f_use_cnt), sum(l_use_cnt), sum(a_use_cnt)
+         , sum(save_use_cnt), sum(file_use_cnt), sum(link_use_cnt), sum(api_use_cnt), sum(apis_use_cnt), <span class="keyword">CURRENT_TIMESTAMP</span>
+    <span class="keyword">FROM</span> (
+        <span class="keyword">SELECT</span> m.org_cd_top <span class="keyword">AS</span> org_cd, count(*) <span class="keyword">AS</span> tot_use_cnt
+             , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'S'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>) <span class="keyword">AS</span> s_use_cnt
+             , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'T'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>) <span class="keyword">AS</span> t_use_cnt
+             , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'C'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>) <span class="keyword">AS</span> c_use_cnt
+             , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'M'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>) <span class="keyword">AS</span> m_use_cnt
+             , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'F'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>) <span class="keyword">AS</span> f_use_cnt
+             , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'L'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>) <span class="keyword">AS</span> l_use_cnt
+             , sum(<span class="keyword">CASE WHEN</span> srv_cd = <span class="string">'A'</span> <span class="keyword">THEN</span> 1 <span class="keyword">ELSE</span> 0 <span class="keyword">END</span>) <span class="keyword">AS</span> a_use_cnt
+             , 0 <span class="keyword">AS</span> save_use_cnt, 0 <span class="keyword">AS</span> file_use_cnt, 0 <span class="keyword">AS</span> link_use_cnt, 0 <span class="keyword">AS</span> api_use_cnt, 0 <span class="keyword">AS</span> apis_use_cnt
+        <span class="keyword">FROM</span> tb_log_open_inf_srv l
+        <span class="keyword">LEFT JOIN</span> (<span class="keyword">SELECT</span> a.inf_id, b.org_cd_top <span class="keyword">FROM</span> tb_open_inf a <span class="keyword">INNER JOIN</span> tb_comm_org b <span class="keyword">ON</span> a.org_cd = b.org_cd) m <span class="keyword">ON</span> l.inf_id = m.inf_id
+<span class="modified-line">        <span class="keyword">WHERE</span> l.reg_dttm &gt;= var_work_date::<span class="keyword">timestamp</span> <span class="keyword">AND</span> l.reg_dttm &lt; (var_work_date + 1)::<span class="keyword">timestamp</span></span>
+        <span class="keyword">GROUP BY</span> m.org_cd_top, l.srv_cd
+        -- ... (나머지 UNION ALL 영역도 동일하게 CASE/COALESCE 적용하여 변환 가능)
+    ) list
+    <span class="keyword">GROUP BY</span> list.org_cd;
+
+    p_retmsg := to_char(var_work_date, <span class="string">'YYYY-MM-DD'</span>) || <span class="string">' 통계 생성 완료'</span>;
+    <span class="keyword">RAISE NOTICE</span> <span class="string">'%'</span>, p_retmsg;
+
+<span class="keyword">EXCEPTION</span>
+    <span class="keyword">WHEN OTHERS THEN</span>
+        <span class="keyword">GET STACKED DIAGNOSTICS</span> p_retmsg = MESSAGE_TEXT;
+        <span class="keyword">INSERT INTO</span> tb_log_job (job_no, job_nm, job_tag, source, target, rowcount, message, reg_dttm)
+        <span class="keyword">VALUES</span> (nextval(<span class="string">'sq_log_job'</span>), v_job_name, <span class="string">'FAIL'</span>, <span class="string">'TB_LOG_OPEN_INF_*'</span>, <span class="string">'TB_STAT_OPEN_*'</span>, 0, p_retmsg, <span class="keyword">CURRENT_TIMESTAMP</span>);
+        <span class="keyword">RAISE EXCEPTION</span> <span class="string">'프로시저 실행 오류: %'</span>, p_retmsg;
+<span class="keyword">END</span>;
+$function$;</div>
+
+        <p style="font-size:12px; color:#666; margin-top:8px;">
+          <strong>변경 위치 5곳:</strong> 모두 <code>timestamp</code> 컬럼과 <code>DATE + integer</code> 결과 비교 → 명시적 <code>::timestamp</code> 캐스트 추가.
+          <br>🟡 <strong>[수정 1]</strong> 1-1 INSERT (line 63): <code>a.open_dttm &lt; (CURRENT_DATE + 1)::timestamp</code>
+          <br>🟡 <strong>[수정 2~4]</strong> 1-2 UNION ALL 3개 (line 98/101/104): 각각 <code>&lt; (CURRENT_DATE + 1)::timestamp</code>
+          <br>🟡 <strong>[수정 5]</strong> 1-3 tb_log_open_inf_srv (line 130): <code>l.reg_dttm &gt;= var_work_date::timestamp AND l.reg_dttm &lt; (var_work_date + 1)::timestamp</code>
+        </p>
+
+        <div class="warn-box" style="background:#fffde7; border-left:4px solid #f9a825; margin-top:10px;">
+          <strong>참고:</strong> line 132 의 <code>-- ... 나머지 UNION ALL 영역 ...</code> 주석은 운영 원본 상태 그대로 유지 (timestamp 에러와 무관, 추후 별도 작업).
+        </div>
+
+        <h5 style="margin-top:14px;">검증</h5>
+        <div class="sql-copy-block">
+<textarea readonly>-- 1. 캐스트 적용 확인
+SELECT substring(pg_get_functiondef(p.oid) from 'reg_dttm\s*>=\s*[^A]+timestamp')
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'gdpslptl' AND p.proname = 'sp_stat_day';
+
+-- 2. 직접 호출 테스트
+SELECT gdpslptl.sp_stat_day('20260528');
+
+-- 3. 결과 확인
+SELECT count(*) FROM gdpslptl.tb_stat_open_org;
+SELECT count(*) FROM gdpslptl.tb_stat_open_prgs_d WHERE yyyymmdd = '20260528';
+SELECT count(*) FROM gdpslptl.tb_stat_use_org    WHERE yyyymmdd = '20260528';</textarea>
+          <button class="copy-btn" onclick="copySql(this)">복사</button>
+        </div>
+
+        <div class="fix-box"><strong>2026-05-29</strong> &mdash; <code>gdpslptl.sp_stat_day</code>: timestamp/date 비교 5곳에 명시적 <code>::timestamp</code> 캐스트 추가 / 적용 예정</div>
+      </div>
     </div>
   </div>
 
